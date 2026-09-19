@@ -1,0 +1,28 @@
+# secrets / env
+.env
+.env.local
+.env.*.local
+
+# Claude Code config — kept fully local, not in the public repo
+CLAUDE.md
+.claude/
+
+# Personal notes — never commit even if this file ends up in the project folder by accident
+PERSONAL-NOTES*.md
+
+# node
+node_modules/
+.next/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ML tracking (local file-store MLflow data — keep runs out of git history)
+mlruns/
+mlartifacts/
+
+# OS
+.DS_Store

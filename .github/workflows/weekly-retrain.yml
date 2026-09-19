@@ -1,0 +1,36 @@
+name: Weekly Model Retrain + Alphagate
+
+on:
+  schedule:
+    - cron: "0 9 1 * *" # 4 AM ET, first Monday of each month (start simple)
+  workflow_dispatch:
+
+jobs:
+  retrain_and_gate:
+    runs-on: ubuntu-latest
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Retrain and gate
+        run: |
+          pip install anthropic xgboost mlflow
+          python -c "
+          import subprocess
+          cmd = '''claude -p \"
+          Read CLAUDE.md and execute the weekly retrain task.
+          Retrain The Analyst on the past week of price data.
+          Run alphagate to compare the new model against the current champion.
+          Log the decision (promoted/rejected) to MLflow and MODEL_CARD.md.
+          If promoted, update the live model reference.
+          Commit all changes.
+          \"'''
+          subprocess.run(cmd, shell=True)
+          "
