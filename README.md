@@ -2,7 +2,7 @@
 
 Six AI trading personas, paper-trading real market data, arguing with and learning from each other — built and operated by an autonomous, multi-agent Claude Code pipeline.
 
-**Built by [Nafis Uddin](https://github.com/nafisuddinn) — directed and reviewed, not hand-coded. See [how](CLAUDE.md).**
+**Built by [Nafis Uddin](https://github.com/nafisuddinn) — directed and reviewed, not hand-coded. See [how](PRD-and-backlog.md#5-architecture).**
 
 **Status**: in progress, building in public. See the [build log](#) once deployed, or `PRD-and-backlog.md` for the live task list.
 

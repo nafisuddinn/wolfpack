@@ -2,35 +2,87 @@ name: Weekly Model Retrain + Alphagate
 
 on:
   schedule:
-    - cron: "0 9 1 * *" # 4 AM ET, first Monday of each month (start simple)
+    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month, regardless of weekday (start simple)
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   retrain_and_gate:
     runs-on: ubuntu-latest
-    env:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - name: Retrain and gate
+
+      # Step A: mechanical retrain + alphagate comparison. No LLM call.
+      # Real failures must fail the job — no continue-on-error, no swallowed
+      # exit codes.
+      - name: Retrain and gate (mechanical)
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          # SAFETY: this secret must always be https://paper-api.alpaca.markets — the
+          # PreToolUse hook (.claude/settings.json) only covers Claude's own tool calls,
+          # NOT this CI secret's value, so a misconfigured secret here is not caught automatically.
+          ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          pip install anthropic xgboost mlflow
-          python -c "
-          import subprocess
-          cmd = '''claude -p \"
-          Read CLAUDE.md and execute the weekly retrain task.
-          Retrain The Analyst on the past week of price data.
-          Run alphagate to compare the new model against the current champion.
-          Log the decision (promoted/rejected) to MLflow and MODEL_CARD.md.
-          If promoted, update the live model reference.
-          Commit all changes.
-          \"'''
-          subprocess.run(cmd, shell=True)
-          "
+          pip install xgboost mlflow
+          # TODO: python -m worker.retrain_analyst (or equivalent) once the weekly
+          # retrain + alphagate script (backlog, ML layer) is implemented.
+          # Intentionally not invoking a placeholder command here — that would
+          # either silently no-op or fail in a misleading way. Wire in the real
+          # command (with normal non-zero-exit-on-failure semantics, no `|| true`)
+          # as soon as it lands. MLflow is a local file-store per the PRD, so no
+          # separate tracking-server credential is needed.
+          echo "Weekly retrain + alphagate script not yet implemented — skipping."
+
+      - name: Configure git identity
+        run: |
+          git config user.name "wolfpack-bot"
+          git config user.email "wolfpack-bot@users.noreply.github.com"
+
+      - name: Record pre-Claude HEAD
+        id: pre_claude
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Step B: Claude writes the promote/reject decision write-up only.
+      # Least-privilege — no broker credentials in this step's environment;
+      # MLflow is a local file-store, so no separate credential is needed either.
+      - name: Write promote/reject decision (Claude)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: .claude/settings.json
+          prompt: "Follow .github/RUNBOOK.md, section 'Weekly retrain / alphagate procedure'."
+          claude_args: --max-turns 15 --allowedTools "Read,Write,Edit,Bash(git:*)"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      # Deterministic backstop: the Claude step above is instructed (via
+      # RUNBOOK.md) to commit AND push, but if its turn budget
+      # (--max-turns 15) runs out after committing but before pushing, the
+      # job would otherwise still report green while the promote/reject
+      # write-up never reaches the repo. This step pushes (no-op if already
+      # pushed) and fails loudly if a local commit still isn't on origin/main.
+      - name: Ensure commit is pushed
+        run: |
+          git push origin HEAD:main || true
+          git fetch origin main
+          LOCAL_SHA="$(git rev-parse HEAD)"
+          REMOTE_SHA="$(git rev-parse origin/main)"
+          if [ "$LOCAL_SHA" = "${{ steps.pre_claude.outputs.sha }}" ]; then
+            echo "No commit was made during this run (e.g. no retrain changes) — nothing to push."
+            exit 0
+          fi
+          if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+            echo "::error::Local HEAD ($LOCAL_SHA) does not match origin/main ($REMOTE_SHA) after push attempt — commit was not pushed."
+            exit 1
+          fi
+          echo "Commit successfully pushed to origin/main."

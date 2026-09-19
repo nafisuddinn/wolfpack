@@ -2,36 +2,84 @@ name: Daily Trade Execution
 
 on:
   schedule:
-    - cron: "0 21 * * *" # 4 PM ET (21:00 UTC)
+    - cron: "0 21 * * *" # 21:00 UTC (4 PM EST / 5 PM EDT — after market close)
   workflow_dispatch: # also allows manual trigger
+
+permissions:
+  contents: write
 
 jobs:
   execute_trades:
     runs-on: ubuntu-latest
-    env:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - name: Run daily trades
+
+      # Step A: mechanical trade execution. No LLM call, $0 marginal cost.
+      # Real failures must fail the job — no continue-on-error, no swallowed
+      # exit codes.
+      - name: Run daily trades (mechanical)
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          # SAFETY: this secret must always be https://paper-api.alpaca.markets — the
+          # PreToolUse hook (.claude/settings.json) only covers Claude's own tool calls,
+          # NOT this CI secret's value, so a misconfigured secret here is not caught automatically.
+          ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
         run: |
-          pip install anthropic
-          python -c "
-          import subprocess
-          import json
-          cmd = '''claude -p \"
-          Read CLAUDE.md and execute the daily trade-execution task from the backlog.
-          Run the Python worker that places trades for each persona.
-          Log all trades to the database.
-          Write rationales for each trade using the documentarian agent.
-          Commit results.
-          \"'''
-          subprocess.run(cmd, shell=True)
-          "
+          # TODO: python -m worker.daily_trades once the worker (backlog Week 1) is implemented.
+          # Intentionally not invoking a placeholder command here — that would either
+          # silently no-op or fail in a misleading way. This step is a no-op until the
+          # worker module exists; wire in the real command (with normal non-zero-exit-on-
+          # failure semantics, no `|| true`) as soon as it lands.
+          echo "worker.daily_trades not yet implemented — skipping mechanical trade execution."
+
+      - name: Configure git identity
+        run: |
+          git config user.name "wolfpack-bot"
+          git config user.email "wolfpack-bot@users.noreply.github.com"
+
+      - name: Record pre-Claude HEAD
+        id: pre_claude
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Step B: Claude writes plain-language rationale only. Least-privilege —
+      # no broker or news API credentials in this step's environment.
+      - name: Write daily trade rationale (Claude)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: .claude/settings.json
+          prompt: "Follow .github/RUNBOOK.md, section 'Daily rationale procedure'."
+          claude_args: --max-turns 15 --allowedTools "Read,Write,Edit,Bash(git:*)"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      # Deterministic backstop: the Claude step above is instructed (via
+      # RUNBOOK.md) to commit AND push, but if its turn budget
+      # (--max-turns 15) runs out after committing but before pushing, the
+      # job would otherwise still report green while today's rationale
+      # never reaches the repo. This step pushes (no-op if already pushed)
+      # and fails loudly if a local commit still isn't on origin/main.
+      - name: Ensure commit is pushed
+        run: |
+          git push origin HEAD:main || true
+          git fetch origin main
+          LOCAL_SHA="$(git rev-parse HEAD)"
+          REMOTE_SHA="$(git rev-parse origin/main)"
+          if [ "$LOCAL_SHA" = "${{ steps.pre_claude.outputs.sha }}" ]; then
+            echo "No commit was made during this run (e.g. no trades today) — nothing to push."
+            exit 0
+          fi
+          if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+            echo "::error::Local HEAD ($LOCAL_SHA) does not match origin/main ($REMOTE_SHA) after push attempt — commit was not pushed."
+            exit 1
+          fi
+          echo "Commit successfully pushed to origin/main."

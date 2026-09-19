@@ -3,9 +3,10 @@
 .env.local
 .env.*.local
 
-# Claude Code config — kept fully local, not in the public repo
+# Claude Code config — kept fully local except the paper-trading safety hook
 CLAUDE.md
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Personal notes — never commit even if this file ends up in the project folder by accident
 PERSONAL-NOTES*.md
