@@ -201,6 +201,9 @@ Grounded in real research, not just a feature idea: a well-studied line of AI wo
 - [ ] Add Claude Code's daily rationale-writing task; confirm it runs entirely on Pro-plan usage, no separate API billing
 - [ ] Draft one-pager + this PRD (mark v1)
 
+### Hardening / Security follow-ups (accepted-risk items, tracked here so nothing is only "in chat")
+- [ ] Harden `set_trade_rationale` RPC auth — currently callable by the public anon key so the least-privilege Claude rationale-writing step can use it (2026-09-20 Decision Log entry); accepted for v1 since trade IDs are non-enumerable UUIDs, but a stranger could theoretically pre-empt one trade's rationale (write-once, no recovery). Real fix: scope the RPC to a short-lived signed token issued per CI run instead of the public anon key. Not blocking, not currently scheduled to a specific week — revisit if time allows in Week 3/4, otherwise stays an explicit, documented Phase 2 item.
+
 ### Week 2 — More personas + feed
 - [ ] Implement Persona #2 (Contrarian): strategy logic + raw trade logging
 - [ ] Implement Persona #3 (The Analyst): feature engineering using log returns (stationary, not raw price), initial XGBoost model with strict chronological train/test split, MLflow local tracking, wire mechanical execution to model output
