@@ -194,7 +194,7 @@ Grounded in real research, not just a feature idea: a well-studied line of AI wo
 
 ### Week 1 — Foundations
 - [ ] Set up Alpaca paper trading account, verify API access with a test order
-- [ ] Scaffold repo: Next.js app, Python worker, Supabase Postgres schema (trades, personas, prices, trust_weights tables)
+- [x] Scaffold repo: Next.js app, Python worker, Supabase Postgres schema (trades, personas, prices, trust_weights tables)
 - [ ] Architect `alphagate`'s core promotion logic as a standalone, generic module from day one — champion, challenger, metric fn, holdout data in; promote/reject + log out
 - [ ] Confirm Claude Code headless run works end-to-end on one trivial task
 - [ ] Implement Persona #1 (Trend Follower): strategy logic, places paper trade, logs raw trade to DB
