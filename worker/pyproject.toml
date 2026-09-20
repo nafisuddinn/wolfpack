@@ -1,0 +1,24 @@
+[project]
+name = "wolfpack-worker"
+version = "0.1.0"
+description = "WolfPack's mechanical trade-execution worker (paper trading only, via Alpaca)."
+authors = [
+    { email = "nafisuddin535@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "supabase>=2.9.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+wolfpack-worker = "wolfpack_worker:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"

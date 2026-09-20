@@ -38,6 +38,11 @@ procedures:
   `https://paper-api.alpaca.markets` — the PreToolUse safety hook only covers
   Claude's own tool calls, not this CI secret's value, so a misconfigured
   secret here would not be caught automatically.
+- `SUPABASE_SERVICE_ROLE_KEY` is a required repo secret for the mechanical
+  (non-LLM) trade-execution and retrain steps only — it must never be passed
+  to a Claude/prose-writing step's `env`. Those steps stay scoped to
+  `SUPABASE_URL`/`SUPABASE_ANON_KEY`, least-privilege, per the 2026-09-19
+  Decision Log entry.
 - Log returns, not raw price, for any ML feature.
 - Every trade needs a logged rationale. No silent trades.
 - State model limitations plainly. Never imply real trading edge that

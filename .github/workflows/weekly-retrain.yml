@@ -30,7 +30,7 @@ jobs:
           # NOT this CI secret's value, so a misconfigured secret here is not caught automatically.
           ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           pip install xgboost mlflow
           # TODO: python -m worker.retrain_analyst (or equivalent) once the weekly

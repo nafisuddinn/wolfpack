@@ -14,9 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          python-version: "3.11"
+          version: "0.12.17"
 
       # Step A: mechanical trade execution. No LLM call, $0 marginal cost.
       # Real failures must fail the job — no continue-on-error, no swallowed
@@ -30,15 +30,9 @@ jobs:
           # NOT this CI secret's value, so a misconfigured secret here is not caught automatically.
           ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
-        run: |
-          # TODO: python -m worker.daily_trades once the worker (backlog Week 1) is implemented.
-          # Intentionally not invoking a placeholder command here — that would either
-          # silently no-op or fail in a misleading way. This step is a no-op until the
-          # worker module exists; wire in the real command (with normal non-zero-exit-on-
-          # failure semantics, no `|| true`) as soon as it lands.
-          echo "worker.daily_trades not yet implemented — skipping mechanical trade execution."
+        run: uv run --project worker -m wolfpack_worker.daily_trades
 
       - name: Configure git identity
         run: |
