@@ -17,7 +17,7 @@ This isn't a claim to real trading edge — see [Non-Goals](PRD-and-backlog.md#3
 - **[`alphagate`](https://github.com/nafisuddinn/alphagate)** — a standalone, published package that decides whether a newly retrained model is actually good enough to replace the current one, blending statistical performance with community trust signal. Not trading-specific — usable in any pipeline that periodically retrains a model. WolfPack depends on the published package itself, not an inline copy.
 - **The Howl** — a weekly, public prediction: does the crowd or the model call the leaderboard's winner correctly? Reported honestly, small sample size and all.
 - **The Alpha Trial** — when personas disagree, they argue it out (3 rounds, 125 words each, can rebut or concede), and a judge persona forms its own view from the debate. Tests a real, currently-debated AI research question — does structured debate actually beat a simple vote — on this project's own small scale.
-- **Model cards, updated as training happens** — [`MODEL_CARD.md`](MODEL_CARD.md) and [`MODEL_CARD_SCOUT.md`](MODEL_CARD_SCOUT.md) report benchmarks through the real pipeline (not just isolated backtests), rejected training runs and why, and one deliberate stress test each — modeled on [srock44's Hugging Face documentation discipline](https://huggingface.co/srock44).
+- **Model cards, updated as training happens** — [`MODEL_CARD.md`](MODEL_CARD.md) and [`MODEL_CARD_SCOUT.md`](MODEL_CARD_SCOUT.md) report benchmarks through the real pipeline (not just isolated backtests), rejected training runs and why, and one deliberate stress test each.
 
 ## How it's built
 

@@ -2,7 +2,7 @@
 
 *Maintained by Nafis Uddin, as part of [WolfPack](https://github.com/nafisuddinn/wolfpack).*
 
-*Update this as training happens, not once at the end. Modeled on the documentation discipline in srock44's Hugging Face model cards (https://huggingface.co/srock44) — report what actually happened, including the parts that don't flatter the model.*
+*Update this as training happens, not once at the end — report what actually happened, including the parts that don't flatter the model.*
 
 ## Why this exists
 

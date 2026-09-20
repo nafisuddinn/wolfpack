@@ -87,9 +87,9 @@ Checked directly rather than assumed, since this changes fast:
 - Explainability: feature importances feed Claude Code's daily rationale task
 - Explicit non-claim: no meaningful real-world trading edge on daily price data — the point is disciplined process, not alpha
 
-## 6a-i. Model documentation discipline (inspired by Sean Rockwitz's Hugging Face model cards)
+## 6a-i. Model documentation discipline
 
-The transferable lesson from srock44's model cards isn't the LLM fine-tuning tooling (LoRA/Unsloth don't apply to a gradient-boosted tree model) — it's the evaluation and documentation rigor. Four concrete practices, ported directly:
+The transferable lesson isn't LLM fine-tuning tooling (LoRA/Unsloth don't apply to a gradient-boosted tree model) — it's evaluation and documentation rigor. Four concrete practices, ported directly:
 
 1. **Report metrics through the real pipeline, not just in isolation.** Show directional accuracy *and* DSR as actually realized through the full pipeline (vol-targeted sizing, transaction costs applied) — these numbers will differ from a clean backtest, and reporting both honestly (not just the flattering one) is the point.
 2. **Log rejected challengers, not just the promoted champion.** `alphagate`'s weekly comparison already produces this data — the addition is writing down *why* a challenger lost, not discarding it. Nearly free, since the comparison already happens.
