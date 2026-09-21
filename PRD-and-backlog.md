@@ -6,6 +6,15 @@ Owner: Nafis Uddin · Status: In progress
 
 ---
 
+## Current Status
+*(Updated at the end of each work session so a fresh conversation can pick up fast — read this before scanning the full Decision Log or Backlog.)*
+
+**Last completed**: Scaffold repo — Next.js app, Python worker, Supabase Postgres schema (2026-09-20)
+**Next up**: Week 1 remaining — place an Alpaca test order to close out account verification; then either architect `alphagate`'s core promotion logic or implement Persona #1 (Trend Follower)
+**Open items needing a decision**: none blocking
+
+---
+
 ## 1. Problem & Why
 
 Quant firms make decisions under uncertainty using structured reasoning, validate models rigorously before trusting them, and explain that reasoning clearly. Most people never see any of that — it's opaque. WolfPack makes it visible: a small set of AI trading personas run distinct, explainable strategies on paper accounts, post every trade with a plain-language rationale, and are ranked by risk-adjusted return — not raw P&L.
