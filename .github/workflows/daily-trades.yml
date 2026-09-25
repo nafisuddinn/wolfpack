@@ -2,7 +2,13 @@ name: Daily Trade Execution
 
 on:
   schedule:
-    - cron: "0 21 * * *" # 21:00 UTC (4 PM EST / 5 PM EDT — after market close)
+    # 21:30 UTC, weekdays only. Market close is 21:00 UTC (4 PM EST) / 20:00
+    # UTC (4 PM EDT); this worker requests Alpaca's SIP feed, which lags live
+    # trades by up to 15 minutes for non-SIP-entitled accounts — running at
+    # :30 instead of :00 clears that delay so refresh_prices always sees a
+    # fully-formed final bar for today's session, not a still-forming one.
+    # Weekdays-only avoids a wasted run when there's no complete new session.
+    - cron: "30 21 * * 1-5"
   workflow_dispatch: # also allows manual trigger
 
 permissions:
