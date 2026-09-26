@@ -9,8 +9,8 @@ Owner: Nafis Uddin · Status: In progress
 ## Current Status
 *(Updated at the end of each work session so a fresh conversation can pick up fast — read this before scanning the full Decision Log or Backlog.)*
 
-**Last completed**: Persona #1 (Trend Follower) — untuned 20/50 SMA crossover on a shared 5-ticker universe, plus the reusable persona strategy-execution framework (target-exposure abstraction, idempotent paper-order execution, price ingestion) it plugs into. Designed by `architect`, implemented by `coder` via TDD, independently verified by `tester` (42/42 tests, closed a real market-data coverage gap), approved by `reviewer` after one fallback-logic fix (2026-09-24)
-**Next up**: Confirm Claude Code headless run works end-to-end on one trivial task (deferred until a real daily-trades CI run exists to test against — also needs the GitHub MCP token's write scope fixed, it 403s on PR creation); then Week 2 — Persona #2 (Contrarian)
+**Last completed**: Persona #1 (Trend Follower) — untuned 20/50 SMA crossover on a shared 5-ticker universe, plus the reusable persona strategy-execution framework (target-exposure abstraction, idempotent paper-order execution, price ingestion) it plugs into. Designed by `architect`, implemented by `coder` via TDD, independently verified by `tester` (42/42 tests, closed a real market-data coverage gap), approved by `reviewer` after one fallback-logic fix. All three open PRs (alphagate core promotion logic, Alpaca/alphagate docs, Persona #1) squash-merged to `main` in both repos (2026-09-26); GitHub MCP token's write scope fixed (Pull requests: Read and write), PR creation/merging both confirmed working
+**Next up**: Confirm Claude Code headless run works end-to-end on one trivial task (deferred until a real daily-trades CI run exists to test against); then Week 2 — Persona #2 (Contrarian)
 **Open items needing a decision**: none blocking
 
 ---
