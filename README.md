@@ -14,7 +14,7 @@ This isn't a claim to real trading edge — see [Non-Goals](PRD-and-backlog.md#3
 
 ## What actually makes this different
 
-- **[`alphagate`](https://github.com/nafisuddinn/alphagate)** — a standalone, published package that decides whether a newly retrained model is actually good enough to replace the current one, blending statistical performance with community trust signal. Not trading-specific — usable in any pipeline that periodically retrains a model. WolfPack depends on the published package itself, not an inline copy.
+- **[`alphagate`](https://github.com/nafisuddinn/alphagate)** — a standalone, domain-agnostic model-governance package: champion/challenger promotion gating with a pluggable comparator (default: strict-margin comparison, ties go to the incumbent) and full audit logging of every decision, promotions and rejections alike. Not trading-specific — usable in any pipeline that periodically retrains a model. Not yet published to PyPI; currently a private source repo WolfPack depends on directly, not an inline copy. Trust-signal blending and a Deflated-Sharpe-based comparator are planned, not built.
 - **The Howl** — a weekly, public prediction: does the crowd or the model call the leaderboard's winner correctly? Reported honestly, small sample size and all.
 - **The Alpha Trial** — when personas disagree, they argue it out (3 rounds, 125 words each, can rebut or concede), and a judge persona forms its own view from the debate. Tests a real, currently-debated AI research question — does structured debate actually beat a simple vote — on this project's own small scale.
 - **Model cards, updated as training happens** — [`MODEL_CARD.md`](MODEL_CARD.md) and [`MODEL_CARD_SCOUT.md`](MODEL_CARD_SCOUT.md) report benchmarks through the real pipeline (not just isolated backtests), rejected training runs and why, and one deliberate stress test each.
@@ -33,4 +33,4 @@ Log returns not raw price. Strictly chronological validation, no shuffled time-s
 
 - [`PRD-and-backlog.md`](PRD-and-backlog.md) — full spec, architecture, and live task list
 - [`MODEL_CARD.md`](MODEL_CARD.md) / [`MODEL_CARD_SCOUT.md`](MODEL_CARD_SCOUT.md) — model documentation, updated continuously
-- [`alphagate`](https://github.com/nafisuddinn/alphagate) — the standalone package
+- [`alphagate`](https://github.com/nafisuddinn/alphagate) — the standalone model-governance package (not yet published)
