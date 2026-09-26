@@ -17,6 +17,12 @@ from wolfpack_worker.config import (
     load_config,
 )
 
+# A fabricated, unmistakably-fake non-paper URL used only to prove the
+# rejection path works. Per project rule, the real live-trading endpoint
+# literal must never appear anywhere in the repo — see
+# test_broker_paper_only.py for the same convention.
+NON_PAPER_URL_LOOKALIKE = "https://not-the-paper-endpoint.example.com"
+
 
 def test_paper_endpoint_passes() -> None:
     # Should not raise.
@@ -26,7 +32,7 @@ def test_paper_endpoint_passes() -> None:
 @pytest.mark.parametrize(
     "bad_url",
     [
-        "https://api.alpaca.markets",  # live trading endpoint
+        NON_PAPER_URL_LOOKALIKE,  # stand-in for the live trading endpoint
         "https://paper-api.alpaca.markets.evil.com",  # lookalike
         "http://paper-api.alpaca.markets",  # http instead of https
         "",
@@ -39,7 +45,7 @@ def test_non_paper_endpoint_raises(bad_url: str) -> None:
 
 
 def test_load_config_raises_on_live_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ALPACA_BASE_URL", "https://api.alpaca.markets")
+    monkeypatch.setenv("ALPACA_BASE_URL", NON_PAPER_URL_LOOKALIKE)
     monkeypatch.setenv("ALPACA_API_KEY", "test")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "test")
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
@@ -69,7 +75,7 @@ def test_load_config_exits_nonzero_as_a_script(monkeypatch: pytest.MonkeyPatch) 
     import sys
 
     env = {
-        "ALPACA_BASE_URL": "https://api.alpaca.markets",
+        "ALPACA_BASE_URL": NON_PAPER_URL_LOOKALIKE,
         "ALPACA_API_KEY": "test",
         "ALPACA_SECRET_KEY": "test",
         "SUPABASE_URL": "https://example.supabase.co",

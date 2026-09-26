@@ -96,6 +96,7 @@ export type Database = {
         Row: {
           broker: string;
           broker_order_id: string | null;
+          client_order_id: string | null;
           fill_price: number | null;
           filled_at: string | null;
           id: string;
@@ -115,6 +116,7 @@ export type Database = {
         Insert: {
           broker?: string;
           broker_order_id?: string | null;
+          client_order_id?: string | null;
           fill_price?: number | null;
           filled_at?: string | null;
           id?: string;
@@ -134,6 +136,7 @@ export type Database = {
         Update: {
           broker?: string;
           broker_order_id?: string | null;
+          client_order_id?: string | null;
           fill_price?: number | null;
           filled_at?: string | null;
           id?: string;
