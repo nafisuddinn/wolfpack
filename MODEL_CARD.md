@@ -10,14 +10,17 @@ The Analyst is WolfPack's ML-driven persona: a gradient-boosted classifier predi
 
 ## What's in this repo
 
-- `train_analyst.py` — the exact training script
-- `features.py` — feature engineering (log returns, volatility, RSI, MA spread, volume change)
-- `eval_analyst.py` — standalone benchmark harness, reproduces the table below
-- MLflow tracking data (local file-store, committed) — full experiment history
+- `worker/src/wolfpack_worker/analyst/train.py` — the exact training script (`python -m wolfpack_worker.analyst.train [--promote]`); logs holdout metrics, baselines, walk-forward folds and the isolated backtest
+- `worker/src/wolfpack_worker/analyst/features.py` — feature engineering (`FEATURE_SPEC_VERSION = "v1"`: 12 log-return / log-ratio features incl. volatility, RSI on log returns, MA spread, volume ratio, SPY returns)
+- `worker/src/wolfpack_worker/analyst/dataset.py` — label, chronological split + 2-session embargo, walk-forward folds, split-artifact data guard
+- `worker/src/wolfpack_worker/analyst/metrics.py` — holdout metrics vs base-rate baselines, isolated long/flat backtest
+- `worker/src/wolfpack_worker/strategies/analyst.py` — daily inference strategy (loads the committed champion)
+- `worker/models/analyst/champion/` — committed champion `model.json` + `manifest.json`
+- `worker/mlflow/mlflow.db` + `worker/mlflow/artifacts/` — MLflow tracking data (local sqlite, committed) — full experiment history
 
-Reproduce with:
+Reproduce with (from the repo root; needs Alpaca + Supabase service-role credentials in `.env`):
 ```bash
-python eval_analyst.py --model <mlflow-run-id>
+uv run --project worker --group train -m wolfpack_worker.analyst.train
 ```
 
 ## Benchmark

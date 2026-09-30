@@ -252,3 +252,41 @@ def test_refresh_prices_logs_warning_when_both_feeds_return_empty_bars(monkeypat
     assert any(
         "no bars" in message and "AAPL" in message for message in caplog.messages
     )
+
+
+# ---------------------------------------------------------------------------
+# Alpaca calendar -> tz-aware Session (alpaca-py returns naive NY wall-clock)
+# ---------------------------------------------------------------------------
+
+
+def test_calendar_naive_new_york_times_become_utc_aware_sessions():
+    from types import SimpleNamespace
+
+    from wolfpack_worker.broker import calendar_to_session
+
+    # EDT (UTC-4): 2026-09-29 16:00 New York == 20:00 UTC
+    summer = SimpleNamespace(
+        date=date(2026, 9, 29),
+        open=datetime(2026, 9, 29, 9, 30),
+        close=datetime(2026, 9, 29, 16, 0),
+    )
+    s = calendar_to_session(summer)
+    assert s.close == datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)
+    assert s.open == datetime(2026, 9, 29, 13, 30, tzinfo=timezone.utc)
+    assert s.close.utcoffset() == timedelta(0)
+
+    # EST (UTC-5) + early close: 2026-11-27 13:00 New York == 18:00 UTC
+    early = SimpleNamespace(
+        date=date(2026, 11, 27),
+        open=datetime(2026, 11, 27, 9, 30),
+        close=datetime(2026, 11, 27, 13, 0),
+    )
+    assert calendar_to_session(early).close == datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc)
+
+    # And the result is usable by latest_completed_session with an aware now
+    # (the naive version raised TypeError here).
+    now = datetime(2026, 9, 29, 20, 20, tzinfo=timezone.utc)
+    assert latest_completed_session(now, [s]).date == date(2026, 9, 29)
+    # Mid-session (17:00 UTC == 13:00 NY) must NOT count as completed.
+    with pytest.raises(ValueError):
+        latest_completed_session(datetime(2026, 9, 29, 17, 0, tzinfo=timezone.utc), [s])
