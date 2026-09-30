@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 
+from wolfpack_worker.strategies.analyst import Analyst
 from wolfpack_worker.strategies.base import Strategy
 from wolfpack_worker.strategies.contrarian import Contrarian
 from wolfpack_worker.strategies.trend_follower import TrendFollower
@@ -17,4 +18,5 @@ from wolfpack_worker.strategies.trend_follower import TrendFollower
 REGISTRY: Dict[str, Callable[[], Strategy]] = {
     "trend-follower": TrendFollower,
     "contrarian": Contrarian,
+    "the-analyst": Analyst,
 }

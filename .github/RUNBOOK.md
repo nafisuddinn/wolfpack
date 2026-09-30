@@ -16,10 +16,15 @@ operational procedures those workflows run — not how this project is built.
 
 ## Weekly retrain / alphagate procedure
 
-1. Retrain The Analyst on the past week of price data, using only data
-   available as of the retrain date — strictly chronological, never
-   including same-day/close-inclusive data in features (already run by the
-   mechanical retrain step — this step does not train models).
+1. Retrain The Analyst on its full price history (re-backfilled from
+   2016-01-04 so split adjustments stay current), using only data available
+   as of the retrain date — strictly chronological. Features for a bar MAY
+   include that bar's own close (the daily run happens after the close), but
+   every LABEL must come strictly after that bar (next open-to-open return),
+   and no training label may reach into the held-out test window (2-session
+   embargo). Already run by the mechanical retrain step
+   (`python -m wolfpack_worker.analyst.train`) — this step does not train
+   models.
 2. Run `alphagate` to compare the newly trained model against the current
    champion model on held-out data.
 3. Log the promote/reject decision to MLflow and to `MODEL_CARD.md`,
