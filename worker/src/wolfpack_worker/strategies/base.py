@@ -69,6 +69,17 @@ class TargetPosition:
 
 
 class Strategy(Protocol):
+    """A persona's signal logic: price history in, target exposures out.
+
+    `evaluate()` returns one `TargetPosition` per ticker it has an opinion
+    on. Omitting a ticker from the returned list means "no opinion, hold
+    current position" — this covers both insufficient history (not enough
+    bars yet to compute a signal at all, e.g. Trend Follower's original use)
+    and an indeterminate state given a full lookback window (e.g. Contrarian
+    finding no decisive bar anywhere in its window). Either way, the
+    orchestrator takes no action for that ticker; it does not mean "flat".
+    """
+
     slug: str
     version: str
     lookback_bars: int
