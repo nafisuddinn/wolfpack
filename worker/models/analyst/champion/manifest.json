@@ -1,0 +1,78 @@
+{
+  "feature_names": [
+    "r_1",
+    "r_5",
+    "r_20",
+    "vol_20",
+    "vol_ratio_5_20",
+    "ma_spread_20_50",
+    "z_20_logp",
+    "rsi_14",
+    "hl_range",
+    "logvol_ratio_20",
+    "spy_r_1",
+    "spy_r_5"
+  ],
+  "feature_spec_version": "v1",
+  "label_definition": "y_t = 1[ln(O_{t+2}/O_{t+1}) > 0] \u2014 sign of the next open-to-open log return (signal after close of t, fill at open of t+1, exit/revise at open of t+2); zero -> 0; last 2 bars unlabeled",
+  "limitations": "No trading edge claimed. Deployed model == evaluated model (not refit on the holdout year).",
+  "mlflow_run_id": "40a14ceee5eb4783947123d76429d805",
+  "model_params": {
+    "colsample_bytree": 0.8,
+    "learning_rate": 0.03,
+    "max_depth": 3,
+    "min_child_weight": 20,
+    "num_boost_round": 300,
+    "objective": "binary:logistic",
+    "reg_lambda": 1.0,
+    "seed": 42,
+    "subsample": 0.8,
+    "tree_method": "hist"
+  },
+  "model_sha256": "7e2cc1bc165bf468a7b038756be1695b3953b96d7b8976c7fdfc526bb7e052ba",
+  "model_version": "analyst-20261001-7e2cc1bc",
+  "test_end": "2026-09-28T04:00:00+00:00",
+  "test_metrics": {
+    "accuracy": 0.5190476190476191,
+    "accuracy_per_ticker": {
+      "AAPL": 0.503968253968254,
+      "JPM": 0.5357142857142857,
+      "QQQ": 0.5476190476190477,
+      "SPY": 0.5158730158730159,
+      "XOM": 0.49206349206349204
+    },
+    "auc": 0.4850836123792456,
+    "baseline_accuracy": 0.5388888888888889,
+    "baseline_brier": 0.24853016636581898,
+    "baseline_logloss": 0.6902050976804625,
+    "beats_baseline_logloss": false,
+    "brier": 0.25154045637424377,
+    "logloss": 0.696335065189285,
+    "n": 1260,
+    "test_up_rate": 0.5388888888888889,
+    "train_up_rate": 0.5454090150250417
+  },
+  "test_start": "2025-09-26T04:00:00+00:00",
+  "threshold": 0.5,
+  "top_importances_gain": {
+    "hl_range": 6.709092617034912,
+    "ma_spread_20_50": 6.232126712799072,
+    "r_1": 6.339090347290039,
+    "spy_r_1": 6.636167049407959,
+    "spy_r_5": 7.110489845275879
+  },
+  "train_start": "2016-03-15T04:00:00+00:00",
+  "trained_through": "2025-09-25T04:00:00+00:00",
+  "walk_forward_summary": {
+    "walk_forward_accuracy_max": 0.569047619047619,
+    "walk_forward_accuracy_mean": 0.5314072608118252,
+    "walk_forward_accuracy_min": 0.4796812749003984,
+    "walk_forward_accuracy_minus_baseline_mean": -0.011523941088647474,
+    "walk_forward_accuracy_std": 0.028130326571503102,
+    "walk_forward_folds": 8.0,
+    "walk_forward_folds_beating_baseline_logloss": 2.0,
+    "walk_forward_logloss_minus_baseline_mean": 0.006989267440013061,
+    "walk_forward_logloss_minus_baseline_std": 0.010457366719562594
+  },
+  "xgboost_version": "3.4.1"
+}
