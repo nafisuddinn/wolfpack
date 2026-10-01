@@ -45,33 +45,21 @@ def latest_completed_session(now: datetime, sessions: list[Session]) -> Session:
     return completed[-1]
 
 
-def refresh_prices(
-    *,
-    ticker: str,
-    broker: Broker,
-    price_store: PriceStore,
-    config: WorkerConfig,
-    as_of: datetime,
-    session_close: datetime,
-) -> pd.DataFrame:
-    """Fetch and upsert daily bars for `ticker` through `session_close`.
+def fetch_daily_bars(
+    *, ticker: str, config: WorkerConfig, start: datetime, end: datetime
+) -> tuple[pd.DataFrame, str | None]:
+    """Fetch split-adjusted daily bars for `ticker` in [start, end] from Alpaca.
 
-    Fetches from `latest_ts - 7 days` (or does a 120-day backfill if
-    `price_store` has no bars for this ticker yet) through `session_close`.
-    Drops any bar with `ts > as_of` before upserting — a defensive measure
-    against Alpaca returning a partial/in-progress bar for a session that
-    hasn't fully closed yet. Returns the freshly upserted bars.
+    Tries DATA_FEED ("sip") first and falls back to "iex" (loudly) if SIP is
+    rejected or returns an empty bar set. Returns (bars, feed_used) where
+    bars has an ascending tz-aware index and open/high/low/close/volume
+    columns; feed_used is None if both feeds returned nothing. Shared by the
+    daily incremental `refresh_prices` and the full-history `backfill`.
     """
     from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical.stock import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
-
-    latest_ts = price_store.latest_bar_ts(ticker, TIMEFRAME)
-    if latest_ts is None:
-        start = session_close - timedelta(days=_BACKFILL_DAYS)
-    else:
-        start = latest_ts - timedelta(days=_INCREMENTAL_LOOKBACK_DAYS)
 
     data_client = StockHistoricalDataClient(
         api_key=config.alpaca_api_key, secret_key=config.alpaca_secret_key
@@ -79,12 +67,13 @@ def refresh_prices(
 
     adjustment = Adjustment(ADJUSTMENT)
     bars_df = None
+    feed_used: str | None = None
     for feed_name in (DATA_FEED, "iex"):
         request = StockBarsRequest(
             symbol_or_symbols=ticker,
             timeframe=TimeFrame.Day,
             start=start,
-            end=session_close,
+            end=end,
             adjustment=adjustment,
             feed=DataFeed(feed_name),
         )
@@ -93,7 +82,7 @@ def refresh_prices(
         except Exception as exc:  # noqa: BLE001 - broad: any feed rejection triggers fallback
             if feed_name == DATA_FEED:
                 logger.warning(
-                    "market_data.refresh_prices: feed=%r rejected for %s "
+                    "market_data.fetch_daily_bars: feed=%r rejected for %s "
                     "(%s) — falling back to feed='iex'.",
                     feed_name,
                     ticker,
@@ -111,7 +100,7 @@ def refresh_prices(
             # docstring: fail loudly, never silently).
             if feed_name == DATA_FEED:
                 logger.warning(
-                    "market_data.refresh_prices: feed=%r returned no bars "
+                    "market_data.fetch_daily_bars: feed=%r returned no bars "
                     "for %s (empty response, not an error) — falling back "
                     "to feed='iex'.",
                     feed_name,
@@ -119,7 +108,7 @@ def refresh_prices(
                 )
                 continue
             logger.warning(
-                "market_data.refresh_prices: both feed=%r and feed='iex' "
+                "market_data.fetch_daily_bars: both feed=%r and feed='iex' "
                 "returned no bars for %s — no price data available this run.",
                 DATA_FEED,
                 ticker,
@@ -128,21 +117,53 @@ def refresh_prices(
             break
 
         bars_df = candidate_df
+        feed_used = feed_name
         if feed_name != DATA_FEED:
             logger.warning(
-                "market_data.refresh_prices: used feed='iex' fallback for %s "
+                "market_data.fetch_daily_bars: used feed='iex' fallback for %s "
                 "— SIP feed was unavailable this run.",
                 ticker,
             )
         break
 
     if bars_df is None or bars_df.empty:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"]), None
 
     if isinstance(bars_df.index, pd.MultiIndex):
         bars_df = bars_df.loc[ticker]
 
-    bars_df = bars_df[["open", "high", "low", "close", "volume"]].sort_index()
+    return bars_df[["open", "high", "low", "close", "volume"]].sort_index(), feed_used
+
+
+def refresh_prices(
+    *,
+    ticker: str,
+    broker: Broker,
+    price_store: PriceStore,
+    config: WorkerConfig,
+    as_of: datetime,
+    session_close: datetime,
+) -> pd.DataFrame:
+    """Fetch and upsert daily bars for `ticker` through `session_close`.
+
+    Fetches from `latest_ts - 7 days` (or does a 120-day backfill if
+    `price_store` has no bars for this ticker yet) through `session_close`.
+    Drops any bar with `ts > as_of` before upserting — a defensive measure
+    against Alpaca returning a partial/in-progress bar for a session that
+    hasn't fully closed yet. Returns the freshly upserted bars.
+    """
+    latest_ts = price_store.latest_bar_ts(ticker, TIMEFRAME)
+    if latest_ts is None:
+        start = session_close - timedelta(days=_BACKFILL_DAYS)
+    else:
+        start = latest_ts - timedelta(days=_INCREMENTAL_LOOKBACK_DAYS)
+
+    bars_df, _feed = fetch_daily_bars(
+        ticker=ticker, config=config, start=start, end=session_close
+    )
+    if bars_df.empty:
+        return bars_df
+
     bars_df = bars_df.loc[bars_df.index <= as_of]
 
     price_store.upsert_bars(ticker, TIMEFRAME, bars_df)

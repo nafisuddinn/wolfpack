@@ -119,6 +119,14 @@ class InMemoryPriceStore:
         truncated = df.loc[df.index <= as_of]
         return truncated.iloc[-limit:] if limit else truncated
 
+    def get_history(self, ticker: str, start: datetime, end: datetime):
+        df = self.bars.get(ticker)
+        if df is None:
+            import pandas as pd
+
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        return df.loc[(df.index >= start) & (df.index <= end)]
+
     def upsert_bars(self, ticker: str, timeframe: str, bars) -> None:
         self.bars[ticker] = bars
 

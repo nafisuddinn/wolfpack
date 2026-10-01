@@ -142,7 +142,31 @@ class AlpacaPaperBroker:
 
         request = GetCalendarRequest(start=start, end=end)
         calendar = self._client.get_calendar(filters=request)
-        return [Session(date=c.date, open=c.open, close=c.close) for c in calendar]
+        return [calendar_to_session(c) for c in calendar]
+
+
+_MARKET_TZ = "America/New_York"
+
+
+def _market_time_to_utc(ts: datetime) -> datetime:
+    from zoneinfo import ZoneInfo
+
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo(_MARKET_TZ))
+    return ts.astimezone(ZoneInfo("UTC"))
+
+
+def calendar_to_session(c) -> Session:
+    """Convert an alpaca-py `Calendar` entry to a tz-aware (UTC) `Session`.
+
+    alpaca-py builds `Calendar.open`/`.close` as NAIVE datetimes from the
+    API's "HH:MM" strings, which are America/New_York wall-clock times.
+    Comparing those to an aware `now` raises TypeError; worse, treating them
+    as UTC would put the "close" 4-5 hours before the real close and let an
+    in-progress bar into a StrategyContext (a lookahead leak). So: localize
+    to New York (DST-aware), then convert to UTC.
+    """
+    return Session(date=c.date, open=_market_time_to_utc(c.open), close=_market_time_to_utc(c.close))
 
 
 def _order_to_broker_order(order) -> BrokerOrder:

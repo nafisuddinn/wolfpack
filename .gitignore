@@ -22,9 +22,17 @@ __pycache__/
 venv/
 .pytest_cache/
 
-# ML tracking (local file-store MLflow data — keep runs out of git history)
+# ML tracking. The Analyst's MLflow history IS committed, by design (PRD 6a:
+# "MLflow in local mode — commits into the repo"): the tracking DB at
+# worker/mlflow/mlflow.db and run artifacts under worker/mlflow/artifacts/.
+# Only ignore MLflow's scratch output: default stores created when MLflow is
+# run WITHOUT our tracking URI (./mlruns, ./mlartifacts) and sqlite's
+# transient journal/WAL files.
 mlruns/
 mlartifacts/
+worker/mlflow/*.db-journal
+worker/mlflow/*.db-wal
+worker/mlflow/*.db-shm
 
 # OS
 .DS_Store
