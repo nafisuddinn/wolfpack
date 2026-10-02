@@ -6,16 +6,11 @@ name: Worker tests
 # and forward logs. No credentials: the tests use synthetic data and the
 # committed model/log files only, never Alpaca or Supabase.
 #
-# KNOWN BLOCKER until it is resolved: the `train` dependency group depends on
+# The `train` dependency group depends on
 #   alphagate @ git+https://github.com/nafisuddinn/alphagate.git@v0.2.0
 # and uv.lock pins that tag to commit 879b10df00acb76c9f48c91c7fb49b368badd599.
-# This job cannot resolve it until the v0.2.0 tag is pushed to GitHub (at that
-# exact commit) AND the alphagate repo is public. That is deliberate: no
-# local-path or vendored workaround.
-#
-# actions/checkout is on the v4 tag, not a commit SHA, because the SHA could not
-# be verified offline when this file was written; pin it (like setup-uv) once
-# looked up.
+# That requires the alphagate repo to stay public and the v0.2.0 tag to stay at
+# that exact commit. No local-path or vendored workaround.
 
 on:
   pull_request:
@@ -30,7 +25,7 @@ jobs:
   worker-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # Full history so the append-only check can read the base branch's
           # (or the previous push's) copy of the logs.
