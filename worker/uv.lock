@@ -147,7 +147,7 @@ wheels = [
 [[package]]
 name = "alphagate"
 version = "0.2.0"
-source = { git = "https://github.com/nafisuddinn/alphagate.git?rev=v0.2.0#a40a2732c13cdf3f288c0bd83341eb770d3d7f7c" }
+source = { git = "https://github.com/nafisuddinn/alphagate.git?rev=v0.2.0#879b10df00acb76c9f48c91c7fb49b368badd599" }
 
 [[package]]
 name = "annotated-doc"
