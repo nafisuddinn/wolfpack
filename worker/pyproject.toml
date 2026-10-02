@@ -28,11 +28,15 @@ wolfpack-worker = "wolfpack_worker:main"
 dev = [
     "pytest>=8.0.0",
 ]
-# Only needed to train The Analyst (`python -m wolfpack_worker.analyst.train`),
-# not by the daily trade cron. Install with `uv sync --group train`.
+# Only needed to train / gate The Analyst (`wolfpack_worker.analyst.train`,
+# `wolfpack_worker.analyst.retrain`), not by the daily trade cron. Install
+# with `uv sync --group train`. The daily cron's champion-integrity backstop
+# (model_io.load_champion) reads gate_log.jsonl as plain JSON and does NOT
+# import alphagate, so alphagate stays out of the main dependencies.
 train = [
     "mlflow>=3.0",
     "scikit-learn>=1.5",
+    "alphagate @ git+https://github.com/nafisuddinn/alphagate.git@v0.2.0",
 ]
 
 [build-system]

@@ -16,22 +16,32 @@ operational procedures those workflows run — not how this project is built.
 
 ## Weekly retrain / alphagate procedure
 
-1. Retrain The Analyst on its full price history (re-backfilled from
-   2016-01-04 so split adjustments stay current), using only data available
-   as of the retrain date — strictly chronological. Features for a bar MAY
-   include that bar's own close (the daily run happens after the close), but
-   every LABEL must come strictly after that bar (next open-to-open return),
-   and no training label may reach into the held-out test window (2-session
-   embargo). Already run by the mechanical retrain step
-   (`python -m wolfpack_worker.analyst.train`) — this step does not train
-   models.
-2. Run `alphagate` to compare the newly trained model against the current
-   champion model on held-out data.
-3. Log the promote/reject decision to MLflow and to `MODEL_CARD.md`,
-   including the reason if rejected.
-4. If promoted, update the live model reference. If rejected, leave the
-   current champion in place.
-5. Commit all changes.
+The mechanical step (not yet wired into `weekly-retrain.yml`; that waits for
+two clean manual refresh runs) is
+`uv run --project worker --group train -m wolfpack_worker.analyst.retrain refresh`.
+It, and only it, trains, runs the `alphagate` gate, appends the decision
+(promote OR reject, with the reason) to
+`worker/models/analyst/gate_log.jsonl`, writes the champion only on PROMOTE,
+tags the MLflow run, and regenerates the gate-history table in
+`MODEL_CARD.md`. New recipes are never tried here: they go through committed
+registrations in `worker/experiments/analyst/` and
+`retrain experiment <file>`, run by a human.
+
+The Claude step that follows writes prose only:
+
+1. Read the newest record(s) in `worker/models/analyst/gate_log.jsonl`
+   (decision, `reason_code`, `explanation`, scores, `comparator_stats`).
+2. Write a short plain-language note of what was decided and why, including
+   why a rejected challenger lost. Never describe a promotion as an
+   improvement or as edge unless the generated table's "Reading" column says
+   so.
+3. Never edit, create, or delete anything under `worker/models/analyst/`
+   (champion files, `gate_log.jsonl`, `forward_log.jsonl`), never hand-edit
+   the generated table between the `analyst-gate-history` markers in
+   `MODEL_CARD.md`, and never re-run the gate. The daily job refuses to load
+   any champion without a matching PROMOTE record, so a hand-written champion
+   would stop The Analyst from trading.
+4. Commit the prose changes.
 
 ## Non-negotiables
 

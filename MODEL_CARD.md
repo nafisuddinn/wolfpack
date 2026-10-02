@@ -10,7 +10,7 @@ The Analyst is WolfPack's ML-driven persona: a gradient-boosted classifier predi
 
 ## What's in this repo
 
-- `worker/src/wolfpack_worker/analyst/train.py` — the exact training script (`python -m wolfpack_worker.analyst.train [--promote]`); logs holdout metrics, baselines, walk-forward folds and the isolated backtest
+- `worker/src/wolfpack_worker/analyst/train.py` — the exact training script (`python -m wolfpack_worker.analyst.train`, report only: it never writes a champion; promotion goes through `python -m wolfpack_worker.analyst.retrain` and the alphagate gate); logs holdout metrics, baselines, walk-forward folds and the isolated backtest
 - `worker/src/wolfpack_worker/analyst/features.py` — feature engineering (`FEATURE_SPEC_VERSION = "v1"`: 12 log-return / log-ratio features incl. volatility, RSI on log returns, MA spread, volume ratio, SPY returns)
 - `worker/src/wolfpack_worker/analyst/dataset.py` — label, chronological split + 2-session embargo, walk-forward folds, split-artifact data guard
 - `worker/src/wolfpack_worker/analyst/metrics.py` — holdout metrics vs base-rate baselines, isolated long/flat backtest
@@ -52,6 +52,20 @@ Per-ticker holdout accuracy: QQQ 0.548, JPM 0.536, SPY 0.516, AAPL 0.504, XOM 0.
 | Date | Change | Result | Promoted? | Why |
 |---|---|---|---|---|
 | 2026-09-30 | Initial training — `analyst-20261001-7e2cc1bc`, first XGBoost champion, no prior model to compare against | Holdout accuracy 0.519 vs. 0.539 baseline, log loss 0.6963 vs. 0.6902 baseline (worse), AUC 0.485. Walk-forward mean accuracy 0.531 ± 0.028 across 8 yearly folds, only 2021 and 2024 beat the log-loss baseline (2024 a near-tie). Isolated gross backtest +0.162 log-return vs. +0.201 buy-and-hold. Worst folds 2020 and 2022 (see Stress test above) | Yes — promoted as `alphagate` champion despite not beating its own baseline | No existing champion to compare against; this backlog item is "ship an initial XGBoost model," not "ship a model with demonstrated edge." `alphagate`'s champion/challenger gate (Week 3) is the mechanism meant to reject underperforming challengers going forward — having a champion in place now gives that gate something to compare future retrains against. See Decision Log 2026-09-30. |
+
+## Promotion-gate history (generated)
+
+Generated from `worker/models/analyst/gate_log.jsonl` and `forward_log.jsonl` by `uv run --project worker -m wolfpack_worker.analyst.render_history`. Do not edit the table by hand; a test fails if it drifts from the logs.
+
+<!-- BEGIN GENERATED: analyst-gate-history. Written by worker/src/wolfpack_worker/analyst/render_history.py from gate_log.jsonl + forward_log.jsonl; do not edit by hand. -->
+**0 trials registered, 0 promoted.** (A trial is a committed registration in `worker/experiments/analyst/`, counted whether or not it ran. Refreshes and the one-time bootstrap are not trials.)
+
+Log loss is the per-session mean across the 5 tickers (lower is better). "Base rate" = always predicting the training up-rate. "Reading" uses fixed words: *improved* only if the trial's paired test vs the champion's recipe was significant at its alpha_k; *edge* only if the model's forward record covers at least 126 sessions and is significantly better than the base rate; otherwise *no detectable change*.
+
+| Date (UTC) | Kind | Recipe / hypothesis | Holdout | Log loss: challenger / champion / base rate | Paired test vs champion | Beats base rate (point estimate)? | Significantly better than base rate? | Decision (reason) | Forward since promotion: log loss vs base rate | Reading |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-02 | bootstrap | `a8e2709b0d8e` (v1) | 2025-09-26 to 2026-09-30 (252 sessions; end = last label bar) | 0.6963 / n/a / 0.6902 | n/a (no incumbent) | no (not gated) | n/a | PROMOTE (no_incumbent) | not monitored yet | no comparison (bootstrap) |
+<!-- END GENERATED: analyst-gate-history -->
 
 ## Known limitations
 

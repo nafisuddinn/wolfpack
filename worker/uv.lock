@@ -145,6 +145,11 @@ wheels = [
 ]
 
 [[package]]
+name = "alphagate"
+version = "0.2.0"
+source = { git = "https://github.com/nafisuddinn/alphagate.git?rev=v0.2.0#a40a2732c13cdf3f288c0bd83341eb770d3d7f7c" }
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -2593,6 +2598,7 @@ dev = [
     { name = "pytest" },
 ]
 train = [
+    { name = "alphagate" },
     { name = "mlflow" },
     { name = "scikit-learn" },
 ]
@@ -2610,6 +2616,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 train = [
+    { name = "alphagate", git = "https://github.com/nafisuddinn/alphagate.git?rev=v0.2.0" },
     { name = "mlflow", specifier = ">=3.0" },
     { name = "scikit-learn", specifier = ">=1.5" },
 ]

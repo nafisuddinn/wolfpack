@@ -1,0 +1,28 @@
+# The Analyst, recipe v1: the exact settings the first champion
+# (analyst-20261001-7e2cc1bc) was trained with. FROZEN: never edit this file.
+# A different setting is a different recipe (a new recipe_id), and a new
+# recipe only reaches production as a pre-registered experiment
+# (worker/experiments/analyst/NNN-<slug>.toml) that passes the alphagate gate.
+#
+# Fixed settings, chosen before looking at any holdout: no tuning, no early
+# stopping, so nothing is selected on the holdout.
+
+feature_spec_version = "v1"
+label = "next_open_to_open_sign_v1"
+threshold = 0.5
+num_boost_round = 300
+universe = ["SPY", "QQQ", "AAPL", "JPM", "XOM"]
+# First bar of price history the dataset is built from. Part of the recipe
+# because moving it changes the model (more or fewer training rows).
+train_since = "2016-01-04"
+
+[xgb_params]
+objective = "binary:logistic"
+max_depth = 3
+learning_rate = 0.03
+subsample = 0.8
+colsample_bytree = 0.8
+min_child_weight = 20
+reg_lambda = 1.0
+tree_method = "hist"
+seed = 42

@@ -3,9 +3,13 @@
 Long-only (v1): long when the committed champion model's P(up) for the next
 open-to-open session is > 0.5, flat otherwise (ties flat). One pooled model
 across the 5-ticker universe; features are log returns / log ratios only
-(see analyst/features.py). The model is trained offline
-(`python -m wolfpack_worker.analyst.train`) and committed to
-`worker/models/analyst/champion/`; this strategy never trains.
+(see analyst/features.py). The model is trained offline and becomes the
+committed champion in `worker/models/analyst/champion/` only through the
+alphagate promotion gate (`python -m wolfpack_worker.analyst.retrain`);
+`load_champion` refuses a champion without a PROMOTE record. This strategy
+never trains. The feature builder is the one named by the champion
+manifest's `feature_spec_version`, so inference always uses the exact
+feature function the model was trained on.
 
 MODEL-RISK LIMITATION: no real trading edge is claimed. Daily-bar direction
 on large, liquid US tickers is close to a coin flip for any model built from
@@ -33,7 +37,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from wolfpack_worker.analyst.features import FEATURE_NAMES, WARMUP_BARS, build_features
 from wolfpack_worker.analyst.metrics import THRESHOLD
 from wolfpack_worker.analyst.model_io import (
     DEFAULT_CHAMPION_DIR,
@@ -78,6 +81,8 @@ class Analyst:
     def evaluate(self, ctx: StrategyContext) -> list[TargetPosition]:
         champ = load_champion(self.model_dir)
         manifest = champ.manifest
+        spec = champ.spec
+        feature_names = spec.names
 
         trained_through = pd.Timestamp(manifest["trained_through"])
         if trained_through.tzinfo is None:
@@ -97,7 +102,7 @@ class Analyst:
         }
         if not window:
             return []
-        feats = build_features(window)
+        feats = spec.build_fn(window)
         latest_session = max(df.index[-1] for df in window.values())
 
         tickers: list[str] = []
@@ -105,7 +110,7 @@ class Analyst:
         for ticker in ctx.universe:
             df = window.get(ticker)
             f = feats.get(ticker)
-            if df is None or f is None or len(df) < WARMUP_BARS:
+            if df is None or f is None or len(df) < spec.warmup_bars:
                 continue  # insufficient history -> hold
             if df.index[-1] != latest_session:
                 logger.info(
@@ -128,7 +133,7 @@ class Analyst:
         if not rows:
             return []
 
-        dmat = xgb.DMatrix(np.vstack(rows), feature_names=list(FEATURE_NAMES))
+        dmat = xgb.DMatrix(np.vstack(rows), feature_names=list(feature_names))
         p_up_all = champ.booster.predict(dmat)
         # Per-prediction feature contributions (TreeSHAP, built into xgboost),
         # in log-odds units; last column is the bias (base log-odds).
@@ -141,12 +146,12 @@ class Analyst:
             bar_ts = df.index[-1]
             p_up = float(p_up_all[i])
             contribs = contribs_all[i]
-            feat_values = {name: float(rows[i][j]) for j, name in enumerate(FEATURE_NAMES)}
-            order = sorted(range(len(FEATURE_NAMES)), key=lambda j: (-abs(float(contribs[j])), j))
+            feat_values = {name: float(rows[i][j]) for j, name in enumerate(feature_names)}
+            order = sorted(range(len(feature_names)), key=lambda j: (-abs(float(contribs[j])), j))
             top = [
                 {
-                    "feature": FEATURE_NAMES[j],
-                    "value": feat_values[FEATURE_NAMES[j]],
+                    "feature": feature_names[j],
+                    "value": feat_values[feature_names[j]],
                     "contribution": float(contribs[j]),
                 }
                 for j in order[:TOP_CONTRIBUTIONS]

@@ -25,7 +25,7 @@ from typing import Iterator, Mapping
 import numpy as np
 import pandas as pd
 
-from wolfpack_worker.analyst.features import FEATURE_NAMES, build_features
+from wolfpack_worker.analyst.features import get_feature_spec
 
 LABEL_DEFINITION = (
     "y_t = 1[ln(O_{t+2}/O_{t+1}) > 0] — sign of the next open-to-open log "
@@ -89,14 +89,15 @@ def make_labels(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def build_dataset(bars: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
+def build_dataset(bars: Mapping[str, pd.DataFrame], spec_version: str = "v1") -> pd.DataFrame:
     """Pooled (all tickers, no ticker-ID feature) labeled dataset.
 
-    Columns: ts, ticker, *FEATURE_NAMES, y (int), fwd_logret, label_end_ts.
-    Rows with any NaN feature or no label are dropped. Sorted by (ts,
-    ticker), RangeIndex — chronological, never shuffled.
+    Columns: ts, ticker, *<spec feature names>, y (int), fwd_logret,
+    label_end_ts. Rows with any NaN feature or no label are dropped. Sorted
+    by (ts, ticker), RangeIndex — chronological, never shuffled.
     """
-    feats = build_features(bars)
+    spec = get_feature_spec(spec_version)
+    feats = spec.build_fn(bars)
     frames = []
     for ticker in sorted(feats):
         f = feats[ticker]
@@ -108,7 +109,7 @@ def build_dataset(bars: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
     if not frames:
         raise ValueError("build_dataset: no bars")
     ds = pd.concat(frames, ignore_index=True)
-    ds = ds.dropna(subset=list(FEATURE_NAMES) + ["y"])
+    ds = ds.dropna(subset=list(spec.names) + ["y"])
     ds["y"] = ds["y"].astype(int)
     ds["label_end_ts"] = pd.to_datetime(ds["label_end_ts"], utc=True)
     ds = ds.sort_values(["ts", "ticker"], kind="mergesort").reset_index(drop=True)
@@ -140,28 +141,48 @@ def _embargoed_train(ds: pd.DataFrame, test_start: pd.Timestamp) -> pd.DataFrame
     return ds.loc[mask]
 
 
-def chronological_split(
-    ds: pd.DataFrame, test_sessions: int = TEST_SESSIONS
-) -> Split:
-    """Test = the most recent `test_sessions` sessions (all tickers). Train =
-    everything before, minus the embargo."""
+def trailing_test_start(ds: pd.DataFrame, test_sessions: int = TEST_SESSIONS) -> pd.Timestamp:
+    """First session of the most recent `test_sessions` labeled sessions."""
     dates = session_dates(ds)
     if len(dates) < test_sessions + EMBARGO_SESSIONS + 1:
         raise ValueError(
             f"Need more than {test_sessions + EMBARGO_SESSIONS} labeled sessions "
             f"for a {test_sessions}-session holdout; have {len(dates)}."
         )
-    test_start = pd.Timestamp(dates[-test_sessions])
+    return pd.Timestamp(dates[-test_sessions])
+
+
+def split_at(ds: pd.DataFrame, test_start: pd.Timestamp) -> Split:
+    """Test = every row with ts >= `test_start`. Train = rows strictly before
+    it, minus the embargo (row ts before the EMBARGO_SESSIONS sessions that
+    precede test_start, AND label_end_ts < test_start).
+
+    `trained_through` = the label end of the last training row: the last
+    bar any training label read. With the 2-session embargo that is exactly
+    one session before `test_start`, which is why the alphagate gate is
+    called with embargo=0 (the embargo is already in the rows).
+    """
+    test_start = pd.Timestamp(test_start)
     test = ds.loc[ds["ts"] >= test_start]
     train = _embargoed_train(ds, test_start)
     if train.empty:
-        raise ValueError("chronological_split: empty training set after embargo")
+        raise ValueError("split_at: empty training set after embargo")
+    if test.empty:
+        raise ValueError("split_at: empty test set")
     return Split(
         train=train,
         test=test,
         test_start=test_start,
         trained_through=pd.Timestamp(train["label_end_ts"].max()),
     )
+
+
+def chronological_split(
+    ds: pd.DataFrame, test_sessions: int = TEST_SESSIONS
+) -> Split:
+    """Test = the most recent `test_sessions` sessions (all tickers). Train =
+    everything before, minus the embargo."""
+    return split_at(ds, trailing_test_start(ds, test_sessions))
 
 
 @dataclass(frozen=True)
@@ -172,11 +193,16 @@ class Fold:
     test_start: pd.Timestamp
 
 
-def walk_forward_folds(ds: pd.DataFrame) -> Iterator[Fold]:
+def walk_forward_folds(ds: pd.DataFrame, test_start: pd.Timestamp | None = None) -> Iterator[Fold]:
     """Expanding-window folds: one per calendar year in WALK_FORWARD_YEARS,
-    plus the trailing TEST_SESSIONS (the deployed model's own holdout). Each
-    fold trains on everything before its test start, minus the embargo.
-    Reporting only — no fold's model is ever deployed."""
+    plus the deployed model's own holdout (rows from `test_start`, default
+    the trailing TEST_SESSIONS). Each fold trains on everything before its
+    test start, minus the embargo. Reporting only — no fold's model is ever
+    deployed and nothing is selected on fold results, so a yearly fold may
+    overlap the final holdout (unchanged from v1, so v1's reported numbers
+    stay reproducible). The pre-holdout-only variant used for exploration is
+    retrain.explore, which truncates the dataset first."""
+    final = split_at(ds, test_start) if test_start is not None else chronological_split(ds)
     years = ds["ts"].dt.year
     for year in WALK_FORWARD_YEARS:
         test = ds.loc[years == year]
@@ -187,8 +213,7 @@ def walk_forward_folds(ds: pd.DataFrame) -> Iterator[Fold]:
         if train.empty:
             continue
         yield Fold(name=str(year), train=train, test=test, test_start=test_start)
-    split = chronological_split(ds)
     yield Fold(
-        name=f"trailing_{TEST_SESSIONS}", train=split.train, test=split.test,
-        test_start=split.test_start,
+        name=f"trailing_{TEST_SESSIONS}", train=final.train, test=final.test,
+        test_start=final.test_start,
     )
