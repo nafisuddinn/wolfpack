@@ -1,0 +1,38 @@
+name: Worker tests
+
+# Runs the worker's full test suite (including The Analyst's gate-log /
+# registration consistency checks and the MODEL_CARD.md drift check) on every
+# PR and on pushes to main. No credentials: the tests use synthetic data and
+# the committed model/log files only, never Alpaca or Supabase.
+#
+# KNOWN BLOCKER until it is resolved: the `train` dependency group depends on
+#   alphagate @ git+https://github.com/nafisuddinn/alphagate.git@v0.2.0
+# and uv.lock pins that tag to commit a40a2732. This job cannot resolve it
+# until the v0.2.0 tag is pushed to GitHub AND the alphagate repo is public.
+# That is deliberate: no local-path or vendored workaround.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
+          python-version: "3.13"
+
+      # --locked: fail if uv.lock is out of date with pyproject.toml instead
+      # of silently re-resolving. The `train` group (mlflow, scikit-learn,
+      # alphagate) is needed by the gate / training tests.
+      - name: Run worker test suite
+        run: uv run --project worker --group train --locked pytest worker/tests -q

@@ -21,16 +21,25 @@ A registration is `worker/experiments/analyst/NNN-<slug>.toml`:
     ...
 
 `preflight` refuses to start an experiment unless: the file is committed in
-HEAD and unchanged; worker/src, worker/recipes, worker/pyproject.toml,
-worker/uv.lock and the experiments directory have no uncommitted changes
-(so the code and the trial count that produced a result are exactly what's
-in git); the file is not abandoned; and its recipe_id has never been scored
-as a challenger before (per the gate log).
+HEAD and unchanged; worker/src, worker/recipes, worker/models (the gate and
+forward logs), worker/pyproject.toml, worker/uv.lock and the experiments
+directory have no uncommitted changes (so the code, the logs, and the trial
+count that produced a result are exactly what's in git); the file is not
+abandoned; and `verify_runnable` passes.
+
+The gate log is the second witness to the trial count. Every trial gate
+record carries its trial_number, registration_file and registration_sha256,
+and `check_log_consistency` requires each logged trial to still have its
+registration, under the same file name, with the same bytes. So a trial that
+ran can't be edited into a different recipe and re-run under the same number,
+deleted to shrink k, or renamed. k = max(registration files, distinct trial
+numbers in the log).
 """
 
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import re
 import subprocess
 import tomllib
@@ -44,7 +53,7 @@ from wolfpack_worker.analyst.recipe import Recipe, RecipeError
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EXPERIMENTS_DIR = REPO_ROOT / "worker" / "experiments" / "analyst"
 # Paths (relative to the repo root) that must be clean for a trial to run.
-CLEAN_PATHS = ("worker/src", "worker/recipes", "worker/pyproject.toml", "worker/uv.lock")
+CLEAN_PATHS = ("worker/src", "worker/recipes", "worker/models", "worker/pyproject.toml", "worker/uv.lock")
 
 _NAME_RE = re.compile(r"^(\d{3})-[a-z0-9]+(?:-[a-z0-9]+)*\.toml$")
 _KEYS = {"trial_number", "registered", "hypothesis", "recipe", "abandoned"}
@@ -140,8 +149,109 @@ def list_registrations(experiments_dir: Path = EXPERIMENTS_DIR) -> list[Registra
 
 
 def count_trials(experiments_dir: Path = EXPERIMENTS_DIR) -> int:
-    """k = number of registration files (abandoned included), NOT completed runs."""
+    """Number of registration files (abandoned included), NOT completed runs.
+    The trial count used for alpha_k is `trial_count`, which also consults
+    the gate log."""
     return len(list_registrations(experiments_dir))
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def logged_trials(gate_records: Sequence[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
+    """trial_number -> {registration_file, registration_sha256, event_id,
+    record_ids} for every trial in the gate log. A trial number that appears
+    in more than one gate event was run more than once: refused."""
+    out: dict[int, dict[str, Any]] = {}
+    for r in gate_records:
+        ctx = r.get("context") or {}
+        if ctx.get("kind") != "trial":
+            continue
+        n = ctx.get("trial_number")
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise RegistrationError(f"gate record {r.get('record_id')} is a trial without an int trial_number")
+        info = out.get(n)
+        if info is None:
+            out[n] = {
+                "registration_file": ctx.get("registration_file"),
+                "registration_sha256": ctx.get("registration_sha256"),
+                "event_id": ctx.get("event_id"),
+                "record_ids": [r.get("record_id")],
+            }
+        elif info["event_id"] != ctx.get("event_id") or info["registration_file"] != ctx.get("registration_file"):
+            raise RegistrationError(
+                f"trial {n} appears in the gate log more than once (events {info['event_id']} and "
+                f"{ctx.get('event_id')}): a trial number can only ever be run once"
+            )
+        else:
+            info["record_ids"].append(r.get("record_id"))
+    return out
+
+
+def check_log_consistency(regs: Sequence[Registration], gate_records: Sequence[Mapping[str, Any]]) -> None:
+    """Every logged trial must still have its registration: same number, same
+    file name, same bytes (when the log recorded a hash)."""
+    by_num = {r.trial_number: r for r in regs}
+    for n, info in sorted(logged_trials(gate_records).items()):
+        logged_name = Path(str(info["registration_file"] or "")).name
+        reg = by_num.get(n)
+        if reg is None:
+            raise RegistrationError(
+                f"trial {n} is in the gate log but its registration {logged_name or '(unknown)'} is missing "
+                "(deleted or renumbered); registrations of run trials are permanent"
+            )
+        if reg.path.name != logged_name:
+            raise RegistrationError(
+                f"trial {n} was run as {logged_name} but is now {reg.path.name}: renamed registrations "
+                "are refused"
+            )
+        sha = info["registration_sha256"]
+        if sha and file_sha256(reg.path) != sha:
+            raise RegistrationError(
+                f"{reg.path.name} was edited after it was run (sha256 differs from the gate log); "
+                "restore it from git"
+            )
+
+
+def trial_count(experiments_dir: Path, gate_records: Sequence[Mapping[str, Any]]) -> int:
+    """k = max(registration files, distinct trial numbers in the gate log),
+    after checking the two agree. Abandoned registrations count."""
+    regs = list_registrations(experiments_dir)
+    check_log_consistency(regs, gate_records)
+    return max(len(regs), len(logged_trials(gate_records)))
+
+
+def verify_runnable(
+    path: Path, *, experiments_dir: Path, gate_records: Sequence[Mapping[str, Any]]
+) -> tuple[Registration, int]:
+    """Everything preflight checks except git: may this registration be run
+    now as a counted trial? Returns (registration, k). gating.run_experiment
+    calls this itself, so it never trusts a caller-supplied k."""
+    path = Path(path).resolve()
+    experiments_dir = Path(experiments_dir).resolve()
+    if path.parent != experiments_dir:
+        raise RegistrationError(f"{path} is not in the experiments directory {experiments_dir}")
+    reg = parse_registration(path)
+    if reg.abandoned:
+        raise RegistrationError(f"{path.name} is marked abandoned ({reg.abandoned}); it counts as a trial but is never run")
+    logged = logged_trials(gate_records)
+    if reg.trial_number in logged:
+        raise RegistrationError(
+            f"trial {reg.trial_number} has already been run (gate records {logged[reg.trial_number]['record_ids']}); "
+            "a registration runs once. A new idea is a new registration with the next number"
+        )
+    if path.name in {Path(str(i["registration_file"] or "")).name for i in logged.values()}:
+        raise RegistrationError(f"{path.name} has already been run")
+    if reg.recipe.recipe_id in evaluated_recipe_ids(gate_records):
+        raise RegistrationError(
+            f"recipe {reg.recipe.recipe_id} has already been evaluated on a gate holdout; "
+            "re-running it would be an uncounted second look"
+        )
+    k = trial_count(experiments_dir, gate_records)
+    if reg.trial_number > k:
+        raise RegistrationError(f"trial_number {reg.trial_number} > number of trials {k}")
+    return reg, k
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -194,15 +304,4 @@ def preflight(
             f"exactly what's committed):\n{dirty_exp}"
         )
 
-    reg = parse_registration(path)
-    if reg.abandoned:
-        raise RegistrationError(f"{rel} is marked abandoned ({reg.abandoned}); it counts as a trial but is never run")
-    if reg.recipe.recipe_id in evaluated_recipe_ids(gate_records):
-        raise RegistrationError(
-            f"recipe {reg.recipe.recipe_id} has already been evaluated on a gate holdout; "
-            "re-running it would be an uncounted second look"
-        )
-    k = count_trials(experiments_dir)
-    if reg.trial_number > k:
-        raise RegistrationError(f"trial_number {reg.trial_number} > number of registrations {k}")
-    return reg, k
+    return verify_runnable(path, experiments_dir=experiments_dir, gate_records=gate_records)

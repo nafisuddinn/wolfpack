@@ -12,16 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from analyst_helpers import gate_record
+from analyst_helpers import append_jsonl, gate_record
 from wolfpack_worker.analyst.recipe import V1_RECIPE_PATH, load_v1_recipe
 from wolfpack_worker.analyst.registration import (
     EXPERIMENTS_DIR,
     REPO_ROOT,
     RegistrationError,
+    CLEAN_PATHS,
     count_trials,
+    file_sha256,
     list_registrations,
+    logged_trials,
     parse_registration,
     preflight,
+    trial_count,
 )
 
 
@@ -152,6 +156,8 @@ def repo(tmp_path):
     exp = root / "worker/experiments/analyst"
     exp.mkdir(parents=True)
     (exp / "README.md").write_text("protocol\n")
+    (root / "worker/models/analyst").mkdir(parents=True)
+    (root / "worker/models/analyst/gate_log.jsonl").write_text("")
     _git(root, "init", "-q")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
@@ -262,3 +268,104 @@ def test_real_experiments_dir_is_where_preflight_looks():
     assert EXPERIMENTS_DIR == REPO_ROOT / "worker" / "experiments" / "analyst"
     assert EXPERIMENTS_DIR.is_dir()
     assert (EXPERIMENTS_DIR / "README.md").is_file()
+
+
+# --- trial-count integrity against the gate log (tester findings 1-3) --------------------
+
+
+def _trial_record(path: Path, n: int, *, decision="reject", rid=None, sha=True, event=None):
+    reg = parse_registration(path)
+    ctx = {"trial_number": n, "registration_file": f"worker/experiments/analyst/{path.name}",
+           "role": "vs_champion_refit", "event_id": event or f"trial{n:03d}-e"}
+    if sha:
+        ctx["registration_sha256"] = file_sha256(path)
+    rec = gate_record(f"analyst-m{n}", "0" * 64, record_id=rid or f"r{n}", decision=decision,
+                      kind="trial", comparator_name="paired_dm", context=ctx)
+    rec["challenger_metadata"]["recipe_id"] = reg.recipe.recipe_id
+    return rec
+
+
+def test_edited_registration_cannot_be_rerun_after_it_was_logged(repo):
+    """Tester repro: trial 1 ran and was REJECTED; editing 001 and committing it
+    gave a new recipe_id and preflight passed with k still 1."""
+    p = _register(repo, 1, max_depth=4)
+    rec = _trial_record(p, 1)
+    p.write_text(registration_text(1, max_depth=5))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "edit trial 1")
+    with pytest.raises(RegistrationError, match="already been run"):
+        _preflight(repo, p, [rec])
+
+
+def test_logged_trial_is_refused_by_number_even_without_a_logged_hash(repo):
+    p = _register(repo, 1, max_depth=4)
+    rec = _trial_record(p, 1, sha=False)
+    p.write_text(registration_text(1, max_depth=5))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "edit")
+    with pytest.raises(RegistrationError, match="already been run"):
+        _preflight(repo, p, [rec])
+
+
+def test_registration_edited_after_its_run_blocks_every_later_trial(repo):
+    p1 = _register(repo, 1, max_depth=4)
+    rec = _trial_record(p1, 1)
+    p1.write_text(registration_text(1, max_depth=5, hypothesis="Rewritten after the fact."))
+    p2 = _register(repo, 2, max_depth=6)  # commits both
+    with pytest.raises(RegistrationError, match="edited after it was run"):
+        _preflight(repo, p2, [rec])
+
+
+def test_deleting_a_logged_registration_is_refused(repo):
+    """Tester repro: deleting the last registration dropped k although its
+    gate record remained."""
+    _register(repo, 1, max_depth=4)
+    p2 = _register(repo, 2, max_depth=6)
+    rec2 = _trial_record(p2, 2)
+    p2.unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "delete trial 2")
+    with pytest.raises(RegistrationError, match="missing"):
+        _preflight(repo, repo / "worker/experiments/analyst/001-deeper.toml", [rec2])
+    with pytest.raises(RegistrationError, match="missing"):
+        trial_count(repo / "worker/experiments/analyst", [rec2])
+
+
+def test_renaming_a_logged_registration_is_refused(repo):
+    p1 = _register(repo, 1, max_depth=4)
+    rec = _trial_record(p1, 1)
+    p1.rename(p1.with_name("001-renamed.toml"))
+    p2 = _register(repo, 2, max_depth=6)
+    with pytest.raises(RegistrationError, match="renamed"):
+        _preflight(repo, p2, [rec])
+
+
+def test_same_trial_number_logged_twice_is_refused(repo):
+    p1 = _register(repo, 1, max_depth=4)
+    a = _trial_record(p1, 1, rid="a", event="e-a")
+    b = _trial_record(p1, 1, rid="b", event="e-b")
+    with pytest.raises(RegistrationError, match="more than once"):
+        logged_trials([a, b])
+
+
+def test_k_is_max_of_registration_files_and_logged_trials(repo):
+    p1 = _register(repo, 1, max_depth=4)
+    p2 = _register(repo, 2, max_depth=6)
+    rec = _trial_record(p1, 1)
+    exp = repo / "worker/experiments/analyst"
+    assert trial_count(exp, [rec]) == 2  # 2 files, 1 logged
+    reg, k = _preflight(repo, p2, [rec])
+    assert (reg.trial_number, k) == (2, 2)
+
+
+def test_preflight_refuses_uncommitted_gate_log_change(repo):
+    """Tester repro: deleting a REJECT record from gate_log.jsonl (uncommitted)
+    let an already-evaluated recipe run again."""
+    assert "worker/models" in CLEAN_PATHS
+    p = _register(repo, 1, max_depth=4)
+    append_jsonl(repo / "worker/models/analyst/gate_log.jsonl", gate_record("x", "0" * 64, decision="reject"))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "log")
+    (repo / "worker/models/analyst/gate_log.jsonl").write_text("")  # delete the record, uncommitted
+    with pytest.raises(RegistrationError, match="worker/models"):
+        _preflight(repo, p)

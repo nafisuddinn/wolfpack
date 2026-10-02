@@ -109,10 +109,35 @@ def default_gate_log_path(champion_dir: Path) -> Path:
     return Path(champion_dir).parent / GATE_LOG_FILENAME
 
 
-def load_champion(champion_dir: Path = DEFAULT_CHAMPION_DIR, *, gate_log_path: Path | None = None) -> Champion:
+def _registration_index(experiments_dir: Path | None):
+    def load():
+        from wolfpack_worker.analyst.registration import (
+            EXPERIMENTS_DIR,
+            RegistrationError,
+            file_sha256,
+            list_registrations,
+        )
+
+        try:
+            regs = list_registrations(Path(experiments_dir) if experiments_dir is not None else EXPERIMENTS_DIR)
+        except RegistrationError as exc:
+            raise GateLogError(f"experiment registrations are invalid: {exc}") from None
+        return {r.trial_number: (r.path.name, file_sha256(r.path)) for r in regs}
+
+    return load
+
+
+def load_champion(
+    champion_dir: Path = DEFAULT_CHAMPION_DIR,
+    *,
+    gate_log_path: Path | None = None,
+    experiments_dir: Path | None = None,
+) -> Champion:
     """Load + verify the champion, INCLUDING that the alphagate gate promoted it.
 
-    `gate_log_path` defaults to `<champion_dir>/../gate_log.jsonl`.
+    `gate_log_path` defaults to `<champion_dir>/../gate_log.jsonl`;
+    `experiments_dir` (where trial registrations live) defaults to
+    worker/experiments/analyst.
     """
     champ = read_champion_artifact(champion_dir, required_keys=REQUIRED_MANIFEST_KEYS)
     path = Path(gate_log_path) if gate_log_path is not None else default_gate_log_path(champion_dir)
@@ -128,6 +153,7 @@ def load_champion(champion_dir: Path = DEFAULT_CHAMPION_DIR, *, gate_log_path: P
             model_version=m["model_version"],
             model_sha256=m["model_sha256"],
             gate_record_ids=list(m["gate_record_ids"]),
+            registrations=_registration_index(experiments_dir),
         )
     except GateLogError as exc:
         raise ModelIntegrityError(f"champion {m['model_version']!r} failed the gate-log check: {exc}") from None

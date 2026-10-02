@@ -94,12 +94,30 @@ def test_trial_promotes_only_if_floor_also_passes():
     assert "| no |" in row  # floor column
 
 
+def _refresh(guard_ok=True, ni_ok=True):
+    r1 = _rec("f1", "refresh", event="e5", role="vs_deployed_champion", challenger="analyst-r",
+              champion="analyst-v1", decision="promote" if ni_ok else "reject",
+              reason="non_inferior" if ni_ok else "inferior", champ_ll=0.6965, comparator="paired_dm",
+              stats={"t": 2.0, "p": 0.02}, params={"alpha": 0.05, "mode": "non_inferiority", "margin": 0.002})
+    r2 = _rec("f2", "refresh", event="e5", role="anchor_guard", challenger="analyst-r", champion="base-rate",
+              decision="promote" if guard_ok else "reject",
+              reason="within_anchor" if guard_ok else "drifted_from_anchor", champ_ll=0.690,
+              comparator="anchored_gap", stats={"gap": 0.009, "max_gap": 0.00813},
+              params={"anchor_gap": 0.00613, "tolerance": 0.002})
+    return [r1, r2]
+
+
 def test_refresh_promotion_is_never_called_an_improvement():
-    rec = _rec("f", "refresh", event="e5", challenger="analyst-r", champion="analyst-v1", reason="non_inferior",
-               champ_ll=0.6965, comparator="paired_dm", stats={"t": 2.0, "p": 0.02},
-               params={"alpha": 0.05, "mode": "non_inferiority", "margin": 0.002})
-    row = _row(rh.render_table([rec], [], n_registered=0), "refresh")
-    assert "no detectable change" in row and "PROMOTE (non_inferior)" in row
+    row = _row(rh.render_table(_refresh(), [], n_registered=0), "refresh")
+    assert "no detectable change" in row and "PROMOTE" in row and "non_inferior" in row
+    assert "anchor guard: passed" in row
+    assert "improved" not in row
+
+
+def test_refresh_stopped_by_the_anchor_guard_is_shown_as_rejected():
+    row = _row(rh.render_table(_refresh(guard_ok=False), [], n_registered=0), "refresh")
+    assert "REJECT" in row and "drifted_from_anchor" in row
+    assert "not deployed" in row
 
 
 def test_edge_requires_126_sessions_and_significance():
@@ -127,6 +145,14 @@ def test_splice_between_markers():
 
 
 # --- CI checks over the committed repository state --------------------------------------
+
+
+def test_committed_registrations_agree_with_the_gate_log():
+    """Every logged trial still has its registration (same name, same bytes);
+    no trial number was run twice."""
+    from wolfpack_worker.analyst.registration import trial_count
+
+    assert trial_count(EXPERIMENTS_DIR, read_gate_log(GATE_LOG_PATH)) >= 0
 
 
 def test_every_registered_trial_has_a_gate_record_or_is_abandoned():
@@ -159,3 +185,13 @@ def test_model_card_history_matches_the_committed_logs():
         "MODEL_CARD.md's generated gate-history section is stale: run "
         "`uv run --project worker -m wolfpack_worker.analyst.render_history`"
     )
+
+
+def test_a_ci_workflow_runs_the_worker_suite_on_pull_requests():
+    """The consistency checks above only protect anything if CI runs them."""
+    wf = REPO_ROOT / ".github" / "workflows" / "worker-tests.yml"
+    text = wf.read_text()
+    assert "pull_request" in text
+    assert 'python-version: "3.13"' in text
+    assert "uv run --project worker --group train --locked pytest worker/tests" in text
+    assert "secrets." not in text  # tests need no credentials

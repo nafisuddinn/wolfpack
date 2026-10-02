@@ -11,7 +11,7 @@ now) instead of re-running the split-adjusted backfill first.
 
 * refresh: champion's recipe, later cutoff; does nothing unless the cutoff
   would advance >= 20 sessions. Not a trial. Gated (non-inferiority) against
-  the deployed champion.
+  the deployed champion AND by the anchored no-drift guard vs the base rate.
 * experiment: one pre-registered trial (see registration.py); refuses unless
   the registration is committed and unchanged, the code is clean, and the
   recipe was never evaluated. Two gate calls, both must PROMOTE.
@@ -111,9 +111,10 @@ def cmd_refresh(args) -> int:
     bars, as_of, _ = load_price_history(recipe.train_since_date, backfill=args.backfill)
     out = run_refresh(bars, as_of=as_of, run_logger=MlflowRunLogger())
     print(f"refresh: {out.status}: {out.message}")
-    if out.record is not None:
-        r = out.record
-        print(f"  record {r.record_id}: {r.decision.value.upper()} ({r.reason_code}) {r.explanation}")
+    for r in out.records:
+        print(f"  {r.context['role']} record {r.record_id}: {r.decision.value.upper()} ({r.reason_code}) "
+              f"{r.explanation}")
+    if out.records:
         _render()
     return 0
 
@@ -126,7 +127,9 @@ def cmd_experiment(args) -> int:
     champ_recipe = _champion_recipe()
     print(f"trial #{reg.trial_number} of k={k} registered: {reg.hypothesis}")
     bars, as_of, _ = load_price_history(_since(reg.recipe, champ_recipe), backfill=args.backfill)
-    out = run_experiment(bars, reg, k=k, as_of=as_of, git_commit=git_head(), run_logger=MlflowRunLogger())
+    # run_experiment re-derives k itself (and re-checks the registration
+    # against the gate log); preflight's k is only printed above.
+    out = run_experiment(bars, reg, as_of=as_of, git_commit=git_head(), run_logger=MlflowRunLogger())
     for r in out.records:
         print(f"  {r.context['role']}: {r.decision.value.upper()} ({r.reason_code}) record {r.record_id}")
         print(f"    {r.explanation}")

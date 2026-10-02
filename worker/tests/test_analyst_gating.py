@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import math
 from datetime import timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,7 @@ from alphagate import Candidate, Decision, ListSink, LookaheadError, gate, spend
 from analyst_helpers import (  # noqa: E402
     make_predictable_universe_bars,
     weak_recipe_dict,
+    write_registration,
 )
 from wolfpack_worker.analyst import gating  # noqa: E402
 from wolfpack_worker.analyst.dataset import EMBARGO_SESSIONS, build_dataset, session_dates, split_at  # noqa: E402
@@ -31,7 +31,7 @@ from wolfpack_worker.analyst.features import FEATURE_NAMES  # noqa: E402
 from wolfpack_worker.analyst.gate_log import read_gate_log  # noqa: E402
 from wolfpack_worker.analyst.model_io import load_champion, read_champion_artifact, write_champion  # noqa: E402
 from wolfpack_worker.analyst.recipe import Recipe, load_v1_recipe  # noqa: E402
-from wolfpack_worker.analyst.registration import Registration  # noqa: E402
+from wolfpack_worker.analyst.registration import RegistrationError, parse_registration  # noqa: E402
 from wolfpack_worker.analyst.train import build_manifest, model_version_for, run_training  # noqa: E402
 
 N_FULL = 900
@@ -69,6 +69,7 @@ def layout(tmp_path):
         "champion_dir": models / "champion",
         "gate_log_path": models / "gate_log.jsonl",
         "archive_dir": models / "archive",
+        "experiments_dir": tmp_path / "experiments",
     }
 
 
@@ -279,6 +280,7 @@ def test_refresh_gates_non_inferiority_against_the_deployed_champion(champion, l
     assert out.status in ("promoted", "rejected")
     assert out.advance_sessions >= 20
     rec = out.record
+    assert [r.context["role"] for r in out.records] == ["vs_deployed_champion", "anchor_guard"]
     assert rec.context["kind"] == "refresh"
     assert rec.champion_id == old["model_version"]  # the DEPLOYED model, not a refit
     assert rec.comparator_name == "paired_dm"
@@ -290,7 +292,8 @@ def test_refresh_gates_non_inferiority_against_the_deployed_champion(champion, l
     assert rec.holdout_n_samples == 252 and len(rec.challenger_score.samples) == 252
     assert rec.challenger_metadata["recipe_id"] == old["recipe_id"]  # same recipe
     log = read_gate_log(layout["gate_log_path"])
-    assert log[-1]["record_id"] == rec.record_id  # logged whatever the decision
+    # Both calls logged whatever the decision.
+    assert [r["record_id"] for r in log[-2:]] == [r.record_id for r in out.records]
     # This stump refit (row/column subsampling) is 0.0022 worse on average,
     # past the 0.002 margin, so non-inferiority is not shown: REJECT, and the
     # deployed champion is untouched.
@@ -324,7 +327,9 @@ def test_refresh_stable_refit_is_non_inferior_and_promoted(layout, full_bars):
     assert rec.reason_code == "non_inferior"
     now = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"]).manifest
     assert now["model_version"] == rec.challenger_id != old["model_version"]
-    assert now["gate_record_ids"] == [rec.record_id]
+    guard = out.records[1]
+    assert guard.promoted and guard.reason_code == "within_anchor"
+    assert now["gate_record_ids"] == [rec.record_id, guard.record_id]
     assert now["recipe_id"] == old["recipe_id"] and now["promoted_by"] == "refresh"
     assert pd.Timestamp(now["test_start"]) == pd.Timestamp(rec.holdout_start)
     assert (layout["archive_dir"] / old["model_version"] / "model.json").is_file()
@@ -335,18 +340,16 @@ def test_refresh_stable_refit_is_non_inferior_and_promoted(layout, full_bars):
 # --- experiment ----------------------------------------------------------------------------
 
 
-def _registration(recipe: Recipe, n: int = 1, hypothesis: str = "h") -> Registration:
-    import datetime as dt
-
-    return Registration(path=Path(f"/nonexistent/{n:03d}-x.toml"), trial_number=n,
-                        registered=dt.date(2026, 10, 2), hypothesis=hypothesis, recipe=recipe,
-                        abandoned=None)
+def _register(layout, n, recipe_dict, **kw):
+    return parse_registration(write_registration(layout["experiments_dir"], n, recipe_dict, **kw))
 
 
 def test_experiment_better_recipe_passes_both_gates_and_is_promoted(champion, layout, full_bars):
     old = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"]).manifest
-    reg = _registration(load_v1_recipe(), n=2, hypothesis="Full v1 settings learn the AR signal.")
-    out = gating.run_experiment(full_bars, reg, k=3, as_of=_as_of(full_bars), git_commit="abc", **layout)
+    _register(layout, 1, weak_recipe_dict(seed=9), abandoned="dropped before running")
+    reg = _register(layout, 2, load_v1_recipe().to_dict(), hypothesis="Full v1 settings learn the AR signal.")
+    _register(layout, 3, weak_recipe_dict(seed=10))
+    out = gating.run_experiment(full_bars, reg, as_of=_as_of(full_bars), git_commit="abc", **layout)
     vs_champ, floor = out.records
     assert vs_champ.context["role"] == "vs_champion_refit" and floor.context["role"] == "floor_vs_base_rate"
     # Same holdout, same challenger, same cutoff for every model.
@@ -355,11 +358,15 @@ def test_experiment_better_recipe_passes_both_gates_and_is_promoted(champion, la
     assert vs_champ.challenger_trained_through == vs_champ.champion_trained_through  # refit at same C
     assert vs_champ.champion_id.startswith("refit-" + old["recipe_id"])
     assert vs_champ.champion_metadata["recipe_id"] == old["recipe_id"]
-    # Multiple-testing level: alpha_k with k = number of registrations.
+    # k is derived inside run_experiment from the registrations (3 files).
     assert vs_champ.context["k"] == 3 and vs_champ.context["trial_number"] == 2
+    assert vs_champ.context["registration_file"].endswith("002-x.toml")
+    assert vs_champ.context["registration_sha256"] == gating.file_sha256(reg.path)
     assert vs_champ.comparator_params["alpha"] == pytest.approx(spend_alpha(0.05, 3))
     assert vs_champ.context["alpha_k"] == pytest.approx(spend_alpha(0.05, 3))
     assert vs_champ.comparator_params["mode"] == "superiority" and vs_champ.comparator_params["hac_lags"] == 5
+    assert vs_champ.comparator_params["margin"] == gating.TRIAL_SUPERIORITY_MARGIN == 0.0005
+    assert vs_champ.comparator_stats["margin"] == 0.0005
     assert floor.comparator_name == "margin" and floor.comparator_params["min_delta"] == 0.0
     edge = vs_champ.context["edge_vs_baseline"]
     assert vs_champ.context["edge_vs_baseline_significant"] == (edge["p"] < vs_champ.context["alpha_k"])
@@ -367,7 +374,8 @@ def test_experiment_better_recipe_passes_both_gates_and_is_promoted(champion, la
     assert vs_champ.promoted and vs_champ.reason_code == "significant_improvement"
     assert floor.promoted
     assert out.promoted
-    champ = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"])
+    champ = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"],
+                          experiments_dir=layout["experiments_dir"])
     m = champ.manifest
     assert m["model_version"] == vs_champ.challenger_id
     assert m["gate_record_ids"] == [vs_champ.record_id, floor.record_id]
@@ -389,9 +397,9 @@ def test_experiment_no_better_recipe_is_rejected_and_both_records_are_logged(cha
     d["xgb_params"] = {**d["xgb_params"], "verbosity": 0}
     same_ish = Recipe.from_dict(d)
     assert same_ish.recipe_id != Recipe.from_dict(weak_recipe_dict()).recipe_id
+    reg = _register(layout, 1, d)
     n_before = len(read_gate_log(layout["gate_log_path"]))
-    out = gating.run_experiment(full_bars, _registration(same_ish), k=1, as_of=_as_of(full_bars),
-                                git_commit="abc", **layout)
+    out = gating.run_experiment(full_bars, reg, as_of=_as_of(full_bars), git_commit="abc", **layout)
     vs_champ, floor = out.records
     assert not vs_champ.promoted and vs_champ.reason_code == "not_significant"
     assert vs_champ.comparator_stats["mean_diff"] == 0.0 and vs_champ.comparator_stats["p"] == 1.0
@@ -402,12 +410,129 @@ def test_experiment_no_better_recipe_is_rejected_and_both_records_are_logged(cha
     assert log[-2]["explanation"]  # why it lost, in words
     now = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"]).manifest
     assert now["model_version"] == old["model_version"]
+    # ...and the same registration can never run again, edited or not (item 1).
+    with pytest.raises(RegistrationError, match="already been run"):
+        gating.run_experiment(full_bars, reg, as_of=_as_of(full_bars), git_commit="abc", **layout)
 
 
 def test_experiment_refuses_the_champions_own_recipe(champion, layout, full_bars, weak_recipe):
-    with pytest.raises(ValueError, match="champion's own recipe"):
-        gating.run_experiment(full_bars, _registration(weak_recipe), k=1, as_of=_as_of(full_bars),
-                              git_commit="abc", **layout)
+    reg = _register(layout, 1, weak_recipe.to_dict())
+    with pytest.raises(ValueError, match="already been evaluated|champion's own recipe"):
+        gating.run_experiment(full_bars, reg, as_of=_as_of(full_bars), git_commit="abc", **layout)
+
+
+def test_run_experiment_derives_k_itself_and_takes_no_k(champion, layout, full_bars):
+    """Tester finding 7: k must not be trusted from the caller."""
+    import inspect
+
+    assert "k" not in inspect.signature(gating.run_experiment).parameters
+    reg = _register(layout, 1, load_v1_recipe().to_dict())
+    # A registration outside the experiments directory is refused.
+    outside = parse_registration(write_registration(layout["experiments_dir"].parent / "elsewhere", 2,
+                                                    weak_recipe_dict(seed=11)))
+    with pytest.raises(RegistrationError, match="experiments directory"):
+        gating.run_experiment(full_bars, outside, as_of=_as_of(full_bars), git_commit="abc", **layout)
+    # A Registration object that doesn't match the file on disk is refused.
+    from dataclasses import replace
+
+    forged = replace(reg, recipe=Recipe.from_dict(weak_recipe_dict(seed=12)))
+    with pytest.raises(RegistrationError, match="does not match"):
+        gating.run_experiment(full_bars, forged, as_of=_as_of(full_bars), git_commit="abc", **layout)
+
+
+# --- item 6: materiality margin on the trial superiority test ---------------------------
+
+
+def test_trial_superiority_margin_blocks_negligible_consistent_gains():
+    import random
+
+    from alphagate import MetricResult, PairedComparator
+
+    rng = random.Random(0)
+    champ = [0.69 + rng.gauss(0, 0.02) for _ in range(252)]
+    tiny = [x - 1e-5 + rng.gauss(0, 1e-7) for x in champ]  # 1e-5 better, every session
+    clear = [x - 0.01 + rng.gauss(0, 0.002) for x in champ]
+    mr = lambda s: MetricResult(value=sum(s) / len(s), samples=s)  # noqa: E731
+    alpha = spend_alpha(0.05, 1)
+    # Without a margin, the negligible gain is "significant" (the problem).
+    assert PairedComparator(alpha=alpha, hac_lags=5).compare(mr(champ), mr(tiny), higher_is_better=False).promote
+    comp = gating.trial_comparator(alpha)
+    assert comp.margin == gating.TRIAL_SUPERIORITY_MARGIN == 0.0005
+    v = comp.compare(mr(champ), mr(tiny), higher_is_better=False)
+    assert not v.promote and v.reason_code == "not_significant" and v.stats["margin"] == 0.0005
+    v = comp.compare(mr(champ), mr(clear), higher_is_better=False)
+    assert v.promote and v.reason_code == "significant_improvement"
+
+
+# --- item 5: anchored no-drift guard on refreshes -----------------------------------------
+
+
+def _anchor_rec(rid, kind, recipe_id, value, base, decision="promote"):
+    return {"record_id": rid, "decision": decision, "challenger_metadata": {"recipe_id": recipe_id},
+            "challenger_score": {"value": value, "details": {"baseline_logloss": base}},
+            "context": {"kind": kind}}
+
+
+def test_refresh_anchor_is_the_first_bootstrap_or_trial_promotion_of_the_recipe():
+    recs = [
+        _anchor_rec("b", "bootstrap", "A", 0.696335, 0.690205),
+        _anchor_rec("r1", "refresh", "A", 0.700, 0.690),
+        _anchor_rec("t-rej", "trial", "B", 0.680, 0.690, decision="reject"),
+    ]
+    a = gating.refresh_anchor(recs, "A")
+    assert a["record_id"] == "b" and a["gap"] == pytest.approx(0.006130)
+    with pytest.raises(gating.PromotionError, match="anchor"):
+        gating.refresh_anchor(recs, "B")  # never promoted
+
+
+def test_anchor_guard_stops_a_drifting_chain_of_non_inferior_refreshes():
+    """Each step is within the 0.002 non-inferiority margin of the PREVIOUS
+    champion, but the chain drifts. The guard is anchored to the recipe's
+    first promotion, so the cumulative drift is capped at ANCHOR_TOLERANCE."""
+    from alphagate import MetricResult
+
+    assert gating.ANCHOR_TOLERANCE == 0.002
+    anchor_gap = 0.006130  # v1: 0.696335 - 0.690205
+    guard = gating.AnchoredGapComparator(anchor_gap=anchor_gap, tolerance=gating.ANCHOR_TOLERANCE)
+    base = 0.690
+    chain = [0.0070, 0.0080, 0.0095]  # step diffs 0.0009, 0.0010, 0.0015 (each "non-inferior")
+    out = [guard.compare(MetricResult(value=base), MetricResult(value=base + g), higher_is_better=False)
+           for g in chain]
+    assert [v.promote for v in out] == [True, True, False]
+    assert out[2].reason_code == "drifted_from_anchor"
+    assert out[2].stats["max_gap"] == pytest.approx(anchor_gap + 0.002)
+
+
+def test_refresh_is_rejected_when_it_drifts_from_its_anchor(layout, full_bars, monkeypatch):
+    d = weak_recipe_dict()
+    d["xgb_params"] = {**d["xgb_params"], "subsample": 1.0, "colsample_bytree": 1.0}
+    recipe = Recipe.from_dict(d)
+    early = {t: df.iloc[:870] for t, df in full_bars.items()}
+    res = run_training(early, recipe, walk_forward=False)
+    manifest = build_manifest(res, "r", model_version=model_version_for(res.model_bytes), gate_record_ids=[],
+                              trial_number=None, promoted_by="x")
+    for k in ("recipe_id", "recipe", "trial_number", "gate_record_ids", "promoted_by"):
+        manifest.pop(k)
+    write_champion(layout["champion_dir"], res.model_bytes, manifest)
+    gating.run_bootstrap(early, champion_dir=layout["champion_dir"], gate_log_path=layout["gate_log_path"],
+                         as_of=_as_of(early), recipe=recipe)
+    old = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"]).manifest
+    # Same scenario that otherwise promotes (test above), but pretend the
+    # recipe was first promoted with a much better gap vs the base rate.
+    real = gating.refresh_anchor
+    monkeypatch.setattr(gating, "refresh_anchor",
+                        lambda recs, rid: {**real(recs, rid), "gap": -0.05})
+    out = gating.run_refresh(full_bars, as_of=_as_of(full_bars), **layout)
+    vs_champ, guard = out.records
+    assert vs_champ.promoted and vs_champ.reason_code == "non_inferior"  # step looks fine...
+    assert not guard.promoted and guard.reason_code == "drifted_from_anchor"  # ...drift is not
+    assert out.status == "rejected"
+    assert guard.comparator_name == "anchored_gap"
+    assert guard.comparator_params["anchor_gap"] == -0.05 and guard.comparator_params["tolerance"] == 0.002
+    assert [r["record_id"] for r in read_gate_log(layout["gate_log_path"])[-2:]] == [vs_champ.record_id,
+                                                                                     guard.record_id]
+    now = load_champion(layout["champion_dir"], gate_log_path=layout["gate_log_path"]).manifest
+    assert now["model_version"] == old["model_version"]
 
 
 # --- promotion requires every gate call to PROMOTE ----------------------------------------

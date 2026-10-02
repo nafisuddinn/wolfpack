@@ -11,14 +11,23 @@ Three kinds of gate event (all logged, promotions and rejections alike):
 * bootstrap (one-time): `gate(challenger=v1, champion=None)` on v1's own
   holdout, so the pre-gate v1 champion has an honest NO_INCUMBENT record.
 * refresh: the champion's recipe refit with a later cutoff (only if the
-  cutoff advances >= 20 sessions). Not a new trial (same recipe). Compared
-  with the deployed champion on the new trailing 252-session holdout by a
-  one-sided Diebold-Mariano NON-INFERIORITY test, margin 0.002 log loss,
-  alpha 0.05. No baseline floor.
+  cutoff advances >= 20 sessions). Not a new trial (same recipe). Two gate
+  calls, both must PROMOTE: (1) vs the deployed champion on the new trailing
+  252-session holdout, one-sided Diebold-Mariano NON-INFERIORITY test,
+  margin 0.002 log loss, alpha 0.05; (2) an anchored no-drift guard
+  (AnchoredGapComparator): the challenger's excess log loss over the base
+  rate must be <= the excess recorded when this recipe was FIRST promoted
+  (bootstrap or trial record) + ANCHOR_TOLERANCE (0.002). Step (1) alone
+  would let a chain of individually non-inferior refreshes drift down; (2)
+  caps the cumulative drift. (A plain base-rate floor would block every v1
+  refresh, since v1 itself is worse than the base rate.)
 * trial: a pre-registered new recipe (registration.py). Two gate calls, both
   must PROMOTE: (1) vs the champion's recipe REFIT at the same cutoff, on the
-  same holdout, one-sided DM SUPERIORITY at alpha_k = spend_alpha(0.05, k),
-  k = number of registered trials, 5 Newey-West lags; (2) vs the constant
+  same holdout, one-sided DM SUPERIORITY with margin
+  TRIAL_SUPERIORITY_MARGIN (0.0005 log loss, so a negligible-but-consistent
+  gain can't promote) at alpha_k = spend_alpha(0.05, k), k derived inside
+  run_experiment from the registrations and the gate log, 5 Newey-West
+  lags; (2) vs the constant
   base-rate predictor (training up-rate) with MarginComparator(0), a
   point-estimate floor. The paired test vs the base rate (at alpha_k) is
   also computed and recorded, but not required.
@@ -79,6 +88,7 @@ from wolfpack_worker.analyst.features import get_feature_spec
 from wolfpack_worker.analyst.gate_log import GateLogError, read_gate_log, verify_promotion
 from wolfpack_worker.analyst.metrics import predict_label
 from wolfpack_worker.analyst.model_io import (
+    _registration_index,
     DEFAULT_CHAMPION_DIR,
     GATE_LOG_PATH,
     MANIFEST_FILENAME,
@@ -91,7 +101,14 @@ from wolfpack_worker.analyst.model_io import (
     write_champion,
 )
 from wolfpack_worker.analyst.recipe import Recipe, load_v1_recipe
-from wolfpack_worker.analyst.registration import REPO_ROOT, Registration
+from wolfpack_worker.analyst.registration import (
+    EXPERIMENTS_DIR,
+    REPO_ROOT,
+    Registration,
+    RegistrationError,
+    file_sha256,
+    verify_runnable,
+)
 from wolfpack_worker.analyst.train import (
     TrainingResult,
     build_manifest,
@@ -109,6 +126,17 @@ HAC_LAGS = 5
 REFRESH_ALPHA = 0.05
 REFRESH_MARGIN = 0.002
 REFRESH_MIN_ADVANCE_SESSIONS = 20
+# Trial superiority test: the challenger must beat the champion's recipe by
+# MORE than this (mean per-session log loss), significantly. Below ~0.0005 a
+# gain is economically negligible for a direction classifier; without a
+# margin, a tiny but very consistent gain (e.g. 1e-5 every session) is
+# "significant" because the paired differences have almost no variance.
+TRIAL_SUPERIORITY_MARGIN = 0.0005
+# Refresh no-drift guard: max (excess log loss over base rate) =
+# anchor excess + ANCHOR_TOLERANCE. Same size as the refresh
+# non-inferiority margin: total cumulative degradation vs the level the
+# recipe was first gated at is capped at one margin.
+ANCHOR_TOLERANCE = 0.002
 # The embargo is already applied to the training rows (see module docstring).
 EMBARGO = timedelta(0)
 _LOGLOSS_EPS = 1e-15
@@ -403,6 +431,78 @@ class RunLogger(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Comparators WolfPack uses
+# ---------------------------------------------------------------------------
+
+
+def trial_comparator(alpha_k: float) -> PairedComparator:
+    return PairedComparator(alpha=alpha_k, mode="superiority", margin=TRIAL_SUPERIORITY_MARGIN, hac_lags=HAC_LAGS)
+
+
+WITHIN_ANCHOR = "within_anchor"
+DRIFTED_FROM_ANCHOR = "drifted_from_anchor"
+
+
+class AnchoredGapComparator:
+    """Refresh no-drift guard (WolfPack-side alphagate Comparator).
+
+    "champion" here is the constant base-rate predictor, scored on the same
+    holdout. gap = challenger log loss - base-rate log loss (> 0 means worse
+    than the base rate). Promote iff gap <= anchor_gap + tolerance, where
+    anchor_gap is the gap recorded when this recipe was first promoted. A
+    point-estimate rule, not a significance test.
+    """
+
+    name = "anchored_gap"
+
+    def __init__(self, anchor_gap: float, tolerance: float = ANCHOR_TOLERANCE, anchor_record_id: str | None = None):
+        if not (np.isfinite(anchor_gap) and np.isfinite(tolerance) and tolerance >= 0):
+            raise ValueError("anchor_gap must be finite and tolerance finite and >= 0")
+        self.anchor_gap = float(anchor_gap)
+        self.tolerance = float(tolerance)
+        self.anchor_record_id = anchor_record_id
+
+    def params(self) -> Mapping[str, Any]:
+        return {"anchor_gap": self.anchor_gap, "tolerance": self.tolerance,
+                "anchor_record_id": self.anchor_record_id}
+
+    def compare(self, champion: MetricResult, challenger: MetricResult, *, higher_is_better: bool):
+        from alphagate import Verdict
+
+        if higher_is_better:
+            raise ValueError("AnchoredGapComparator is for a lower-is-better loss")
+        gap = float(challenger.value) - float(champion.value)
+        max_gap = self.anchor_gap + self.tolerance
+        stats = {"gap": gap, "anchor_gap": self.anchor_gap, "tolerance": self.tolerance, "max_gap": max_gap,
+                 "challenger": float(challenger.value), "base_rate": float(champion.value)}
+        if gap <= max_gap:
+            return Verdict(True, WITHIN_ANCHOR,
+                           f"excess log loss over the base rate {gap!r} <= anchor {self.anchor_gap!r} + "
+                           f"tolerance {self.tolerance!r}", stats)
+        return Verdict(False, DRIFTED_FROM_ANCHOR,
+                       f"excess log loss over the base rate {gap!r} > anchor {self.anchor_gap!r} + tolerance "
+                       f"{self.tolerance!r}: this recipe has drifted below the level it was first promoted at; "
+                       "incumbent retained", stats)
+
+
+def refresh_anchor(records: Sequence[Mapping[str, Any]], recipe_id: str) -> dict[str, Any]:
+    """The gap (challenger log loss - its base-rate log loss) in the FIRST
+    PROMOTE record of kind bootstrap/trial for this recipe. Refreshes never
+    create an anchor, so a chain of refreshes can't move it."""
+    for r in records:
+        ctx = r.get("context") or {}
+        if (
+            r.get("decision") == "promote"
+            and ctx.get("kind") in ("bootstrap", "trial")
+            and (r.get("challenger_metadata") or {}).get("recipe_id") == recipe_id
+        ):
+            score = r["challenger_score"]
+            gap = float(score["value"]) - float(score["details"]["baseline_logloss"])
+            return {"record_id": r.get("record_id"), "gap": gap, "kind": ctx.get("kind")}
+    raise PromotionError(f"no bootstrap/trial PROMOTE record for recipe {recipe_id}: no anchor for a refresh")
+
+
+# ---------------------------------------------------------------------------
 # Promotion (the only champion writer)
 # ---------------------------------------------------------------------------
 
@@ -415,6 +515,7 @@ def promote_from_gate(
     champion_dir: Path = DEFAULT_CHAMPION_DIR,
     gate_log_path: Path = GATE_LOG_PATH,
     archive_dir: Path = ARCHIVE_DIR,
+    experiments_dir: Path = EXPERIMENTS_DIR,
 ) -> dict[str, Any]:
     """Write `model_bytes` as the champion iff EVERY record is a PROMOTE of it.
 
@@ -438,7 +539,8 @@ def promote_from_gate(
     if list(manifest.get("gate_record_ids", [])) != ids:
         raise PromotionError(f"manifest gate_record_ids must be exactly {ids}")
     try:
-        verify_promotion(read_gate_log(gate_log_path), model_version=version, model_sha256=sha, gate_record_ids=ids)
+        verify_promotion(read_gate_log(gate_log_path), model_version=version, model_sha256=sha, gate_record_ids=ids,
+                         registrations=_registration_index(experiments_dir))
     except GateLogError as exc:
         raise PromotionError(f"the persisted gate log does not support this promotion: {exc}") from None
 
@@ -451,7 +553,7 @@ def promote_from_gate(
             for name in (MODEL_FILENAME, MANIFEST_FILENAME):
                 shutil.copy2(champion_dir / name, dest / name)
     written = write_champion(champion_dir, model_bytes, dict(manifest))
-    load_champion(champion_dir, gate_log_path=gate_log_path)  # must pass the daily-cron check
+    load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)  # daily-cron check
     return written
 
 
@@ -563,8 +665,13 @@ class RefreshOutcome:
     status: str  # "skipped" | "promoted" | "rejected"
     advance_sessions: int
     message: str
-    record: Optional[GateRecord] = None
+    records: tuple[GateRecord, ...] = ()
     manifest: Optional[dict[str, Any]] = None
+
+    @property
+    def record(self) -> Optional[GateRecord]:
+        """The non-inferiority record vs the deployed champion (first call)."""
+        return self.records[0] if self.records else None
 
 
 def cutoff_advance(ds: pd.DataFrame, old_cutoff, new_cutoff) -> int:
@@ -584,8 +691,9 @@ def run_refresh(
     sink: Optional[RecordSink] = None,
     run_logger: Optional[RunLogger] = None,
     min_advance: int = REFRESH_MIN_ADVANCE_SESSIONS,
+    experiments_dir: Path = EXPERIMENTS_DIR,
 ) -> RefreshOutcome:
-    champ = load_champion(champion_dir, gate_log_path=gate_log_path)
+    champ = load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)
     m = champ.manifest
     recipe = _manifest_recipe(m)
     bars = truncate_to(bars, as_of)
@@ -603,6 +711,7 @@ def run_refresh(
             ),
         )
 
+    anchor = refresh_anchor(read_gate_log(gate_log_path), recipe.recipe_id)
     result = run_training(bars, recipe, test_start=new_cutoff)
     version = model_version_for(result.model_bytes, today)
     if version == m["model_version"]:
@@ -610,6 +719,12 @@ def run_refresh(
     holdout = build_shared_holdout([(spec, ds)], new_cutoff)
     challenger = _training_candidate(result, version, {"role": "refresh_challenger"})
     champion = _deployed_candidate(champ, "deployed_champion")
+    baseline = Candidate(
+        model=ConstantScorer(result.train_up_rate),
+        id=f"base-rate-{new_cutoff:%Y%m%d}",
+        trained_through=_utc(result.trained_through),
+        metadata={"role": "constant_base_rate", "p_up": result.train_up_rate},
+    )
     event = _event_id("refresh", as_of)
     run_id = (
         run_logger.log(result, tags={"event_id": event, "event_kind": "refresh"},
@@ -617,41 +732,63 @@ def run_refresh(
         if run_logger
         else None
     )
-    record = gate(
+    common = {
+        "kind": "refresh",
+        "event_id": event,
+        "recipe_id": recipe.recipe_id,
+        "trial_number": m.get("trial_number"),
+        "previous_test_start": m["test_start"],
+        "cutoff_advance_sessions": advance,
+        "deployed_champion": m["model_version"],
+        "mlflow_run_id": run_id,
+    }
+    sink = _sink(sink, gate_log_path)
+    rec1 = gate(
         challenger=challenger,
         champion=champion,
         metric=LOGLOSS_METRIC,
         holdout=holdout,
-        sink=_sink(sink, gate_log_path),
+        sink=sink,
         comparator=PairedComparator(
             alpha=REFRESH_ALPHA, mode="non_inferiority", margin=REFRESH_MARGIN, hac_lags=HAC_LAGS
         ),
         embargo=EMBARGO,
         as_of=as_of,
-        context={
-            "kind": "refresh",
-            "event_id": event,
-            "recipe_id": recipe.recipe_id,
-            "trial_number": m.get("trial_number"),
-            "previous_test_start": m["test_start"],
-            "cutoff_advance_sessions": advance,
-            "mlflow_run_id": run_id,
-            "note": "Same recipe, later cutoff: not a new trial. Non-inferiority vs the deployed champion.",
-        },
+        context={**common, "role": "vs_deployed_champion",
+                 "note": "Same recipe, later cutoff: not a new trial. Non-inferiority vs the deployed champion."},
     )
+    rec2 = gate(
+        challenger=challenger,
+        champion=baseline,
+        metric=LOGLOSS_METRIC,
+        holdout=holdout,
+        sink=sink,
+        comparator=AnchoredGapComparator(anchor["gap"], ANCHOR_TOLERANCE, anchor["record_id"]),
+        embargo=EMBARGO,
+        as_of=as_of,
+        context={**common, "role": "anchor_guard", "anchor_record_id": anchor["record_id"],
+                 "note": "No-drift guard: excess log loss over the base rate may not exceed the recipe's "
+                         "first-promotion excess + tolerance. Point estimate, not a significance test."},
+    )
+    records = (rec1, rec2)
     if run_logger and run_id:
-        run_logger.tag(run_id, {"gate_record_id": record.record_id, "gate_decision": record.decision.value})
-    if not record.promoted:
-        return RefreshOutcome("rejected", advance, f"refresh rejected ({record.reason_code})", record)
+        run_logger.tag(run_id, {
+            "gate_record_id": rec1.record_id,
+            "gate_record_id_anchor_guard": rec2.record_id,
+            "gate_decision": "promote" if promotion_authorised(records) else "reject",
+        })
+    if not promotion_authorised(records):
+        reasons = f"{rec1.reason_code}; anchor guard: {rec2.reason_code}"
+        return RefreshOutcome("rejected", advance, f"refresh rejected ({reasons})", records)
     manifest = build_manifest(
-        result, run_id or "none", model_version=version, gate_record_ids=[record.record_id],
+        result, run_id or "none", model_version=version, gate_record_ids=[rec1.record_id, rec2.record_id],
         trial_number=m.get("trial_number"), promoted_by="refresh",
     )
     written = promote_from_gate(
-        [record], model_bytes=result.model_bytes, manifest=manifest, champion_dir=champion_dir,
-        gate_log_path=gate_log_path, archive_dir=archive_dir,
+        list(records), model_bytes=result.model_bytes, manifest=manifest, champion_dir=champion_dir,
+        gate_log_path=gate_log_path, archive_dir=archive_dir, experiments_dir=experiments_dir,
     )
-    return RefreshOutcome("promoted", advance, f"refresh promoted {version} ({record.reason_code})", record, written)
+    return RefreshOutcome("promoted", advance, f"refresh promoted {version} ({rec1.reason_code})", records, written)
 
 
 # ---------------------------------------------------------------------------
@@ -678,19 +815,33 @@ def run_experiment(
     bars: Mapping[str, pd.DataFrame],
     registration: Registration,
     *,
-    k: int,
     as_of: datetime,
     git_commit: str,
     champion_dir: Path = DEFAULT_CHAMPION_DIR,
     gate_log_path: Path = GATE_LOG_PATH,
     archive_dir: Path = ARCHIVE_DIR,
+    experiments_dir: Path = EXPERIMENTS_DIR,
     today: date | None = None,
     sink: Optional[RecordSink] = None,
     run_logger: Optional[RunLogger] = None,
 ) -> ExperimentOutcome:
-    """Run one registered trial. Callers must run registration.preflight
-    first (retrain.py does); this function trusts `k`."""
-    champ = load_champion(champion_dir, gate_log_path=gate_log_path)
+    """Run one registered trial.
+
+    Does not trust its caller: re-checks the registration against
+    `experiments_dir` and the gate log (registration.verify_runnable: never
+    run before, recipe never evaluated, every logged trial's registration
+    intact) and derives k itself. The git checks (committed, clean tree) are
+    registration.preflight, which the CLI runs first.
+    """
+    on_disk, k = verify_runnable(registration.path, experiments_dir=experiments_dir,
+                                 gate_records=read_gate_log(gate_log_path))
+    fields = lambda r: (r.trial_number, r.registered, r.hypothesis, r.recipe, r.abandoned)  # noqa: E731
+    if Path(on_disk.path).resolve() != Path(registration.path).resolve() or fields(on_disk) != fields(registration):
+        raise RegistrationError(
+            f"the Registration passed in does not match {Path(registration.path).name} on disk"
+        )
+    registration_sha = file_sha256(registration.path)
+    champ = load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)
     m = champ.manifest
     champ_recipe = _manifest_recipe(m)
     chal_recipe = registration.recipe
@@ -753,6 +904,7 @@ def run_experiment(
         "deployed_champion": m["model_version"],
         "hypothesis": registration.hypothesis,
         "registration_file": _registration_file(registration),
+        "registration_sha256": registration_sha,
         "registered": registration.registered.isoformat(),
         "git_commit": git_commit,
         "cutoff": cutoff.isoformat(),
@@ -765,7 +917,7 @@ def run_experiment(
         metric=LOGLOSS_METRIC,
         holdout=holdout,
         sink=sink,
-        comparator=PairedComparator(alpha=alpha_k, mode="superiority", hac_lags=HAC_LAGS),
+        comparator=trial_comparator(alpha_k),
         embargo=EMBARGO,
         as_of=as_of,
         context={**common, "role": "vs_champion_refit", "edge_vs_baseline": edge,
@@ -801,6 +953,6 @@ def run_experiment(
     )
     written = promote_from_gate(
         [rec1, rec2], model_bytes=chal.model_bytes, manifest=manifest, champion_dir=champion_dir,
-        gate_log_path=gate_log_path, archive_dir=archive_dir,
+        gate_log_path=gate_log_path, archive_dir=archive_dir, experiments_dir=experiments_dir,
     )
     return ExperimentOutcome((rec1, rec2), True, written, edge)

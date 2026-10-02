@@ -30,7 +30,7 @@ from typing import Any, Mapping, Sequence
 from wolfpack_worker.analyst.forward import MIN_EDGE_SESSIONS
 from wolfpack_worker.analyst.gate_log import FORWARD_LOG_FILENAME, PROMOTE, read_gate_log
 from wolfpack_worker.analyst.model_io import GATE_LOG_PATH, MODELS_DIR
-from wolfpack_worker.analyst.registration import EXPERIMENTS_DIR, REPO_ROOT, count_trials
+from wolfpack_worker.analyst.registration import EXPERIMENTS_DIR, REPO_ROOT, trial_count
 
 MODEL_CARD_PATH = REPO_ROOT / "MODEL_CARD.md"
 FORWARD_LOG_PATH = MODELS_DIR / FORWARD_LOG_FILENAME
@@ -141,17 +141,29 @@ def _row(event: Sequence[Mapping[str, Any]], forward: Sequence[Mapping[str, Any]
         decision_s = f"{decision} (vs champion: {main.get('reason_code')}; base-rate floor: {floor_txt})"
         reading = "improved" if main.get("reason_code") == "significant_improvement" else "no detectable change"
     elif kind == "refresh":
-        promoted = first.get("decision") == PROMOTE
+        main = next((r for r in event if (r.get("context") or {}).get("role") == "vs_deployed_champion"), first)
+        guard = next((r for r in event if (r.get("context") or {}).get("role") == "anchor_guard"), None)
+        promoted = all(r.get("decision") == PROMOTE for r in event)
         kind_s = "refresh"
         recipe_s = f"`{recipe_id}` (same recipe, later cutoff)"
-        champ_ll = _f((first.get("champion_score") or {}).get("value")) + " (deployed)"
-        st, pa = first.get("comparator_stats") or {}, first.get("comparator_params") or {}
+        champ_ll = _f((main.get("champion_score") or {}).get("value")) + " (deployed)"
+        st, pa = main.get("comparator_stats") or {}, main.get("comparator_params") or {}
         test_s = (
             f"t={_f(st.get('t'), 2)}, p={_g(st.get('p'))} vs alpha={_g(pa.get('alpha'))} "
             f"(non-inferiority, margin {pa.get('margin')})"
         )
-        floor_s, sig_s = "n/a", "n/a"
-        decision_s = f"{'PROMOTE' if promoted else 'REJECT'} ({first.get('reason_code')})"
+        sig_s = "n/a"
+        if guard is None:
+            guard_txt = "n/a"
+        else:
+            gs = guard.get("comparator_stats") or {}
+            guard_txt = (
+                f"{'passed' if guard.get('decision') == PROMOTE else 'failed'} "
+                f"(excess {_f(gs.get('gap'))} vs max {_f(gs.get('max_gap'))})"
+            )
+        floor_s = f"anchor guard: {guard_txt}"
+        reasons = "; ".join(f"{(r.get('context') or {}).get('role', '?')}: {r.get('reason_code')}" for r in event)
+        decision_s = f"{'PROMOTE' if promoted else 'REJECT'} ({reasons})"
         reading = "no detectable change"
     else:
         promoted = first.get("decision") == PROMOTE
@@ -222,9 +234,8 @@ def current_table(
     forward_log_path: Path = FORWARD_LOG_PATH,
     experiments_dir: Path = EXPERIMENTS_DIR,
 ) -> str:
-    return render_table(
-        read_gate_log(gate_log_path), read_gate_log(forward_log_path), n_registered=count_trials(experiments_dir)
-    )
+    records = read_gate_log(gate_log_path)
+    return render_table(records, read_gate_log(forward_log_path), n_registered=trial_count(experiments_dir, records))
 
 
 def write(model_card_path: Path = MODEL_CARD_PATH) -> bool:

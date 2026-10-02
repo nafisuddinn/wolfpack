@@ -188,3 +188,84 @@ def test_daily_path_works_without_alphagate_mlflow_or_sklearn():
         "assert champ.manifest['gate_record_ids']\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).parent)
+
+
+# --- tamper hardening (tester finding 4) ---------------------------------------------
+
+
+def _forge(tmp_path, model_bytes, record: dict, version="analyst-20260101-0f0f0f0f"):
+    champ = tmp_path / "champion"
+    manifest = {**_manifest(version), "gate_record_ids": [record["record_id"]]}
+    write_champion(champ, model_bytes, manifest)
+    record = {**record, "challenger_id": version}
+    record.setdefault("challenger_metadata", {})["model_sha256"] = sha256_bytes(model_bytes)
+    append_jsonl(tmp_path / "gate_log.jsonl", record)
+    return champ
+
+
+def test_minimal_hand_written_promote_record_is_refused(tmp_path, model_bytes):
+    """Tester repro: a 4-field PROMOTE line used to be accepted."""
+    rec = {"record_id": "fake1", "decision": "promote", "chronology_checked": True}
+    champ = _forge(tmp_path, model_bytes, rec)
+    with pytest.raises(ModelIntegrityError, match="kind"):
+        load_champion(champ, experiments_dir=tmp_path / "exp")
+
+
+@pytest.mark.parametrize("kind", [None, "manual", "hotfix"])
+def test_promote_with_unknown_kind_is_refused(tmp_path, model_bytes, kind):
+    rec = gate_record("x", "x", record_id="k1")
+    if kind is None:
+        del rec["context"]["kind"]
+    else:
+        rec["context"]["kind"] = kind
+    with pytest.raises(ModelIntegrityError, match="kind"):
+        load_champion(_forge(tmp_path, model_bytes, rec), experiments_dir=tmp_path / "exp")
+
+
+@pytest.mark.parametrize("score", [{}, {"value": None}, {"value": "NaN", "samples": [0.7]},
+                                   {"value": 0.69, "samples": []}, None])
+def test_promote_without_a_real_challenger_score_is_refused(tmp_path, model_bytes, score):
+    rec = gate_record("x", "x", record_id="s1")
+    rec["challenger_score"] = score
+    with pytest.raises(ModelIntegrityError, match="challenger_score"):
+        load_champion(_forge(tmp_path, model_bytes, rec), experiments_dir=tmp_path / "exp")
+
+
+def test_promote_with_unrecognised_comparator_is_refused(tmp_path, model_bytes):
+    rec = gate_record("x", "x", record_id="c1", comparator_name="always_yes")
+    with pytest.raises(ModelIntegrityError, match="comparator"):
+        load_champion(_forge(tmp_path, model_bytes, rec), experiments_dir=tmp_path / "exp")
+
+
+def test_trial_promote_must_match_a_registration(tmp_path, model_bytes):
+    from analyst_helpers import weak_recipe_dict, write_registration
+    from wolfpack_worker.analyst.registration import file_sha256
+
+    exp = tmp_path / "exp"
+    rec = gate_record("x", "x", record_id="t1", kind="trial", comparator_name="paired_dm",
+                      context={"trial_number": 1, "registration_file": "worker/experiments/analyst/001-x.toml"})
+    champ = _forge(tmp_path, model_bytes, rec)
+    with pytest.raises(ModelIntegrityError, match="registration"):
+        load_champion(champ, experiments_dir=exp)  # no registration file at all
+    reg = write_registration(exp, 1, weak_recipe_dict(), slug="other")
+    with pytest.raises(ModelIntegrityError, match="registration"):
+        load_champion(champ, experiments_dir=exp)  # wrong file name
+    reg.rename(exp / "001-x.toml")
+    assert load_champion(champ, experiments_dir=exp)  # matches
+
+    # ...and if the log recorded the registration hash, the bytes must match.
+    log = tmp_path / "gate_log.jsonl"
+    line = json.loads(log.read_text())
+    line["context"]["registration_sha256"] = file_sha256(exp / "001-x.toml")
+    log.write_text(json.dumps(line) + "\n")
+    assert load_champion(champ, experiments_dir=exp)
+    (exp / "001-x.toml").write_text((exp / "001-x.toml").read_text().replace('"h"', '"edited"'))
+    with pytest.raises(ModelIntegrityError, match="registration"):
+        load_champion(champ, experiments_dir=exp)
+
+
+def test_bootstrap_promote_must_be_the_first_record_in_the_log(tmp_path, model_bytes):
+    append_jsonl(tmp_path / "gate_log.jsonl", gate_record("earlier", "0" * 64, record_id="z0", decision="reject"))
+    rec = gate_record("x", "x", record_id="b2")  # kind=bootstrap, but not first
+    with pytest.raises(ModelIntegrityError, match="bootstrap"):
+        load_champion(_forge(tmp_path, model_bytes, rec), experiments_dir=tmp_path / "exp")

@@ -57,21 +57,56 @@ def gate_record(
     record_id: str = "rec-0001",
     decision: str = "promote",
     chronology_checked: bool = True,
+    kind: str = "bootstrap",
+    comparator_name: str = "margin",
     context: dict | None = None,
+    challenger_score: dict | None = None,
 ) -> dict:
-    """Minimal alphagate GateRecord dict (only the fields the backstop reads),
-    as one JSONL line would deserialize. Tests use this instead of calling
+    """An alphagate GateRecord dict as one gate_log.jsonl line deserializes,
+    with the fields the backstop checks. Tests use this instead of calling
     alphagate so the daily-path backstop is tested without alphagate."""
     return {
         "schema_version": 1,
         "record_id": record_id,
+        "decided_at": "2026-10-01T12:00:00+00:00",
         "decision": decision,
         "reason_code": "no_incumbent" if decision == "promote" else "not_significant",
         "challenger_id": model_version,
         "chronology_checked": chronology_checked,
+        "comparator_name": comparator_name,
+        "challenger_score": challenger_score if challenger_score is not None else {
+            "value": 0.69, "samples": [0.69, 0.69], "details": {"baseline_logloss": 0.69}},
         "challenger_metadata": {"model_sha256": model_sha256},
-        "context": context or {},
+        "context": {"kind": kind, **(context or {})},
     }
+
+
+def recipe_toml(recipe_dict: dict) -> str:
+    """A [recipe] table (TOML) from a recipe dict (scalars + lists only)."""
+    import json
+
+    lines = ["[recipe]"]
+    for k, v in recipe_dict.items():
+        if k != "xgb_params":
+            lines.append(f"{k} = {json.dumps(v)}")
+    lines.append("[recipe.xgb_params]")
+    for k, v in recipe_dict["xgb_params"].items():
+        lines.append(f"{k} = {json.dumps(v)}")
+    return "\n".join(lines) + "\n"
+
+
+def write_registration(experiments_dir, n: int, recipe_dict: dict, *, hypothesis: str = "h",
+                       slug: str = "x", abandoned: str | None = None):
+    from pathlib import Path
+
+    d = Path(experiments_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{n:03d}-{slug}.toml"
+    head = f'trial_number = {n}\nregistered = 2026-10-02\nhypothesis = "{hypothesis}"\n'
+    if abandoned:
+        head += f'abandoned = "{abandoned}"\n'
+    p.write_text(head + "\n" + recipe_toml(recipe_dict))
+    return p
 
 
 def append_jsonl(path, record: dict) -> None:

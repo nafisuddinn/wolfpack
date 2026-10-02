@@ -49,6 +49,7 @@ from wolfpack_worker.analyst.gating import (
 )
 from wolfpack_worker.analyst.model_io import DEFAULT_CHAMPION_DIR, GATE_LOG_PATH, MODELS_DIR, Champion, load_champion
 from wolfpack_worker.analyst.recipe import Recipe
+from wolfpack_worker.analyst.registration import EXPERIMENTS_DIR
 from wolfpack_worker.analyst.train import prepare_dataset
 
 FORWARD_LOG_PATH = MODELS_DIR / "forward_log.jsonl"
@@ -66,12 +67,12 @@ def _promotion_time(records: Sequence[Mapping[str, Any]], model_version: str) ->
     return min(times)
 
 
-def _champions(champion_dir: Path, archive_dir: Path, gate_log_path: Path) -> list[Champion]:
-    champs = [load_champion(champion_dir, gate_log_path=gate_log_path)]
+def _champions(champion_dir: Path, archive_dir: Path, gate_log_path: Path, experiments_dir: Path) -> list[Champion]:
+    champs = [load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)]
     if Path(archive_dir).is_dir():
         for d in sorted(Path(archive_dir).iterdir()):
             if d.is_dir():
-                champs.append(load_champion(d, gate_log_path=gate_log_path))
+                champs.append(load_champion(d, gate_log_path=gate_log_path, experiments_dir=experiments_dir))
     return champs
 
 
@@ -97,10 +98,11 @@ def run_monitor(
     archive_dir: Path = ARCHIVE_DIR,
     gate_log_path: Path = GATE_LOG_PATH,
     forward_log_path: Path = FORWARD_LOG_PATH,
+    experiments_dir: Path = EXPERIMENTS_DIR,
 ) -> list[dict[str, Any]]:
     records = read_gate_log(gate_log_path)
     prior = read_gate_log(forward_log_path)
-    champs = _champions(champion_dir, archive_dir, gate_log_path)
+    champs = _champions(champion_dir, archive_dir, gate_log_path, experiments_dir)
     promoted = {c.manifest["model_version"]: _promotion_time(records, c.manifest["model_version"]) for c in champs}
     bars = truncate_to(bars, as_of)
     out: list[dict[str, Any]] = []
