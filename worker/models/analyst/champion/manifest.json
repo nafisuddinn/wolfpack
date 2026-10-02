@@ -14,6 +14,9 @@
     "spy_r_5"
   ],
   "feature_spec_version": "v1",
+  "gate_record_ids": [
+    "932e980ab5dc4e46a91a7d012d719fa0"
+  ],
   "label_definition": "y_t = 1[ln(O_{t+2}/O_{t+1}) > 0] \u2014 sign of the next open-to-open log return (signal after close of t, fill at open of t+1, exit/revise at open of t+2); zero -> 0; last 2 bars unlabeled",
   "limitations": "No trading edge claimed. Deployed model == evaluated model (not refit on the holdout year).",
   "mlflow_run_id": "40a14ceee5eb4783947123d76429d805",
@@ -31,6 +34,33 @@
   },
   "model_sha256": "7e2cc1bc165bf468a7b038756be1695b3953b96d7b8976c7fdfc526bb7e052ba",
   "model_version": "analyst-20261001-7e2cc1bc",
+  "promoted_by": "bootstrap",
+  "recipe": {
+    "feature_spec_version": "v1",
+    "label": "next_open_to_open_sign_v1",
+    "num_boost_round": 300,
+    "threshold": 0.5,
+    "train_since": "2016-01-04",
+    "universe": [
+      "SPY",
+      "QQQ",
+      "AAPL",
+      "JPM",
+      "XOM"
+    ],
+    "xgb_params": {
+      "colsample_bytree": 0.8,
+      "learning_rate": 0.03,
+      "max_depth": 3,
+      "min_child_weight": 20,
+      "objective": "binary:logistic",
+      "reg_lambda": 1.0,
+      "seed": 42,
+      "subsample": 0.8,
+      "tree_method": "hist"
+    }
+  },
+  "recipe_id": "a8e2709b0d8e",
   "test_end": "2026-09-28T04:00:00+00:00",
   "test_metrics": {
     "accuracy": 0.5190476190476191,
@@ -63,6 +93,7 @@
   },
   "train_start": "2016-03-15T04:00:00+00:00",
   "trained_through": "2025-09-25T04:00:00+00:00",
+  "trial_number": null,
   "walk_forward_summary": {
     "walk_forward_accuracy_max": 0.569047619047619,
     "walk_forward_accuracy_mean": 0.5314072608118252,
