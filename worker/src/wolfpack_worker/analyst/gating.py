@@ -77,6 +77,7 @@ from alphagate import (
     MetricResult,
     PairedComparator,
     RecordSink,
+    Verdict,
     gate,
     metric,
     paired_test,
@@ -88,7 +89,6 @@ from wolfpack_worker.analyst.features import get_feature_spec
 from wolfpack_worker.analyst.gate_log import GateLogError, read_gate_log, verify_promotion
 from wolfpack_worker.analyst.metrics import predict_label
 from wolfpack_worker.analyst.model_io import (
-    _registration_index,
     DEFAULT_CHAMPION_DIR,
     GATE_LOG_PATH,
     MANIFEST_FILENAME,
@@ -97,6 +97,7 @@ from wolfpack_worker.analyst.model_io import (
     Champion,
     load_champion,
     read_champion_artifact,
+    registration_index,
     sha256_bytes,
     write_champion,
 )
@@ -466,9 +467,7 @@ class AnchoredGapComparator:
         return {"anchor_gap": self.anchor_gap, "tolerance": self.tolerance,
                 "anchor_record_id": self.anchor_record_id}
 
-    def compare(self, champion: MetricResult, challenger: MetricResult, *, higher_is_better: bool):
-        from alphagate import Verdict
-
+    def compare(self, champion: MetricResult, challenger: MetricResult, *, higher_is_better: bool) -> Verdict:
         if higher_is_better:
             raise ValueError("AnchoredGapComparator is for a lower-is-better loss")
         gap = float(challenger.value) - float(champion.value)
@@ -540,7 +539,7 @@ def promote_from_gate(
         raise PromotionError(f"manifest gate_record_ids must be exactly {ids}")
     try:
         verify_promotion(read_gate_log(gate_log_path), model_version=version, model_sha256=sha, gate_record_ids=ids,
-                         registrations=_registration_index(experiments_dir))
+                         registrations=registration_index(experiments_dir))
     except GateLogError as exc:
         raise PromotionError(f"the persisted gate log does not support this promotion: {exc}") from None
 

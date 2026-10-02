@@ -2,14 +2,20 @@ name: Worker tests
 
 # Runs the worker's full test suite (including The Analyst's gate-log /
 # registration consistency checks and the MODEL_CARD.md drift check) on every
-# PR and on pushes to main. No credentials: the tests use synthetic data and
-# the committed model/log files only, never Alpaca or Supabase.
+# PR and on pushes to main, plus an append-only check on The Analyst's gate
+# and forward logs. No credentials: the tests use synthetic data and the
+# committed model/log files only, never Alpaca or Supabase.
 #
 # KNOWN BLOCKER until it is resolved: the `train` dependency group depends on
 #   alphagate @ git+https://github.com/nafisuddinn/alphagate.git@v0.2.0
-# and uv.lock pins that tag to commit a40a2732. This job cannot resolve it
-# until the v0.2.0 tag is pushed to GitHub AND the alphagate repo is public.
-# That is deliberate: no local-path or vendored workaround.
+# and uv.lock pins that tag to commit 879b10df00acb76c9f48c91c7fb49b368badd599.
+# This job cannot resolve it until the v0.2.0 tag is pushed to GitHub (at that
+# exact commit) AND the alphagate repo is public. That is deliberate: no
+# local-path or vendored workaround.
+#
+# actions/checkout is on the v4 tag, not a commit SHA, because the SHA could not
+# be verified offline when this file was written; pin it (like setup-uv) once
+# looked up.
 
 on:
   pull_request:
@@ -25,11 +31,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the append-only check can read the base branch's
+          # (or the previous push's) copy of the logs.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.12.17"
           python-version: "3.13"
+
+      # Fails if worker/models/analyst/gate_log.jsonl or forward_log.jsonl on
+      # the base is not a byte-prefix of this version: logged decisions
+      # (including rejected challengers) may only ever be appended to.
+      # PR: compare with the base branch. Push to main: compare with the
+      # commit before the push (skipped if that is all zeros, i.e. a new
+      # branch). Manual run: skipped.
+      - name: Gate and forward logs are append-only
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="origin/$BASE_REF"
+          elif [ "$EVENT_NAME" = "push" ]; then
+            BASE="$BEFORE_SHA"
+          else
+            BASE=""
+          fi
+          uv run --project worker --locked python -m wolfpack_worker.analyst.log_guard --base "$BASE"
 
       # --locked: fail if uv.lock is out of date with pyproject.toml instead
       # of silently re-resolving. The `train` group (mlflow, scikit-learn,

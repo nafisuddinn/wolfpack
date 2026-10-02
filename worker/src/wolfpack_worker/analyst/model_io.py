@@ -109,7 +109,10 @@ def default_gate_log_path(champion_dir: Path) -> Path:
     return Path(champion_dir).parent / GATE_LOG_FILENAME
 
 
-def _registration_index(experiments_dir: Path | None):
+def registration_index(experiments_dir: Path | None):
+    """A lazy loader of {trial_number: (registration file name, sha256)} for
+    the backstop's trial checks. Registrations are only parsed if a trial
+    PROMOTE record actually needs them (the daily path usually doesn't)."""
     def load():
         from wolfpack_worker.analyst.registration import (
             EXPERIMENTS_DIR,
@@ -153,7 +156,7 @@ def load_champion(
             model_version=m["model_version"],
             model_sha256=m["model_sha256"],
             gate_record_ids=list(m["gate_record_ids"]),
-            registrations=_registration_index(experiments_dir),
+            registrations=registration_index(experiments_dir),
         )
     except GateLogError as exc:
         raise ModelIntegrityError(f"champion {m['model_version']!r} failed the gate-log check: {exc}") from None
