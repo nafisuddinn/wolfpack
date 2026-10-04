@@ -23,7 +23,7 @@ pytest.importorskip("sklearn")
 from alphagate import ListSink  # noqa: E402
 
 from analyst_helpers import write_registration  # noqa: E402
-from scout_helpers import UNIVERSE, articles, bar_index, business_sessions  # noqa: E402
+from scout_helpers import SECRET, synthetic  # noqa: E402
 from wolfpack_worker.analyst.gate_log import read_gate_log  # noqa: E402
 from wolfpack_worker.analyst.model_io import load_champion  # noqa: E402
 from wolfpack_worker.analyst.registration import RegistrationError, parse_registration  # noqa: E402
@@ -32,35 +32,6 @@ from wolfpack_worker.scout.dataset import build_scout_dataset  # noqa: E402
 from wolfpack_worker.scout.paths import SCOUT_PATHS  # noqa: E402
 from wolfpack_worker.scout.recipe import scout_v1_recipe_dict  # noqa: E402
 from wolfpack_worker.scout.train import rule_backtest, rule_signal, run_scout_training  # noqa: E402
-
-N = 560
-SECRET = "SECRET-HEADLINE-TEXT"
-
-
-def synthetic(signal: bool, seed: int = 0):
-    """Sessions, bars and scored headlines. One headline per ticker per
-    session at 15:00 ET with tone +/-0.8; if `signal`, the label of row t
-    (open t+1 -> open t+2) agrees with that tone 80% of the time."""
-    sessions = business_sessions("2023-01-02", N)
-    idx = bar_index(sessions)
-    rng = np.random.default_rng(seed)
-    bars, rows, aid = {}, [], 1
-    for k, t in enumerate(UNIVERSE):
-        tone = rng.choice([-0.8, 0.8], size=N)
-        mag = np.abs(rng.normal(0, 0.01, size=N))
-        sign = np.where(rng.random(N) < 0.8, np.sign(tone), -np.sign(tone)) if signal else rng.choice([-1, 1], N)
-        o = np.empty(N)
-        o[0] = o[1] = 50.0 + 10 * k
-        for i in range(N - 2):
-            o[i + 2] = o[i + 1] * np.exp(sign[i] * mag[i])  # label of row i
-        close = o * np.exp(rng.normal(0, 0.002, N))
-        bars[t] = pd.DataFrame({"open": o, "high": np.maximum(o, close) * 1.002, "low": np.minimum(o, close) * 0.998,
-                                "close": close, "volume": np.full(N, 1e6)}, index=idx)
-        for i, s in enumerate(sessions):
-            rows.append((aid, s.close - timedelta(hours=1), (t,), f"{SECRET} {aid}", float(tone[i])))
-            aid += 1
-    return sessions, bars, articles(rows)
-
 
 @pytest.fixture()
 def scout_paths(tmp_path):
