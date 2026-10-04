@@ -40,12 +40,18 @@ NaN and are dropped in training / cause a "hold" at inference.
 
 from __future__ import annotations
 
-from typing import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Callable, Mapping
 
 import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 
+# The module-level names below (FEATURE_SPEC_VERSION, FEATURE_NAMES,
+# build_features, WARMUP_BARS) ARE feature spec v1. New code should go
+# through FEATURE_SPECS / get_feature_spec() at the bottom of this file and
+# pick the version from the model's manifest, never assume v1.
 FEATURE_SPEC_VERSION = "v1"
 
 OWN_FEATURE_NAMES: tuple[str, ...] = (
@@ -238,3 +244,50 @@ def build_features(
             joined = pd.DataFrame(np.nan, index=own.index, columns=list(MARKET_FEATURE_NAMES))
         out[ticker] = pd.concat([own, joined], axis=1)[list(FEATURE_NAMES)]
     return out
+
+
+# ---------------------------------------------------------------------------
+# Feature-spec registry (APPEND-ONLY)
+# ---------------------------------------------------------------------------
+#
+# A model is only valid with the exact feature function it was trained on, so
+# every champion manifest names its `feature_spec_version` and both training
+# and inference look the builder up here. Rules:
+#   * Never edit or remove an existing entry. v1's output is pinned by a hash
+#     test (tests/test_analyst_recipe.py); a change there means any deployed
+#     v1 model would see different inputs than it was trained on.
+#   * A new feature idea is a NEW entry ("v2", ...) with its own builder, and
+#     it reaches production only through a registered experiment + the gate.
+#   * Every builder must keep the v1 contract: bars-in / per-ticker frames
+#     out, row t uses only bars <= t, log returns / log ratios only (never a
+#     raw price level), and bit-identical output on a short inference window
+#     vs full history (fixed-length windows, no unbounded recursion).
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    version: str
+    names: tuple[str, ...]
+    build_fn: Callable[[Mapping[str, pd.DataFrame]], dict[str, pd.DataFrame]]
+    warmup_bars: int
+
+
+FEATURE_SPECS: Mapping[str, FeatureSpec] = MappingProxyType(
+    {
+        "v1": FeatureSpec(
+            version="v1",
+            names=FEATURE_NAMES,
+            build_fn=build_features,
+            warmup_bars=WARMUP_BARS,
+        ),
+    }
+)
+
+
+def get_feature_spec(version: str) -> FeatureSpec:
+    try:
+        return FEATURE_SPECS[version]
+    except KeyError:
+        raise KeyError(
+            f"unknown feature_spec_version {version!r}; known: {sorted(FEATURE_SPECS)}"
+        ) from None

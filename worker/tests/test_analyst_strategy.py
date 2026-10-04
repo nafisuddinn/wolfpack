@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 import xgboost as xgb
 
-from analyst_helpers import UNIVERSE, make_universe_bars
+from analyst_helpers import UNIVERSE, make_universe_bars, write_gated_champion
 from fakes import FakeBroker, InMemoryPriceStore, InMemoryTradeRepo
 from wolfpack_worker.analyst.dataset import build_dataset
 from wolfpack_worker.analyst.features import FEATURE_NAMES, FEATURE_SPEC_VERSION
@@ -21,7 +21,6 @@ from wolfpack_worker.analyst.model_io import (
     DEFAULT_CHAMPION_DIR,
     ModelIntegrityError,
     load_champion,
-    write_champion,
 )
 from wolfpack_worker.daily_trades import run_persona
 from wolfpack_worker.execution import FixedNotionalSizer
@@ -47,6 +46,7 @@ def _tiny_manifest(trained_through: pd.Timestamp) -> dict:
     return {
         "model_version": "analyst-20260101-deadbeef",
         "mlflow_run_id": "test-run-id",
+        "recipe_id": "testrecipe00",
         "trained_through": trained_through.isoformat(),
         "feature_spec_version": FEATURE_SPEC_VERSION,
         "feature_names": list(FEATURE_NAMES),
@@ -84,10 +84,13 @@ def bars():
 
 @pytest.fixture()
 def champion_dir(tmp_path, bars):
+    # <tmp>/champion + <tmp>/gate_log.jsonl: load_champion now also requires
+    # the alphagate PROMOTE record next to the champion directory.
     booster = _train_tiny_booster({k: v.iloc[:200] for k, v in bars.items()})
     trained_through = bars["SPY"].index[199]
-    write_champion(tmp_path, bytes(booster.save_raw("json")), _tiny_manifest(trained_through))
-    return tmp_path
+    champ = tmp_path / "champion"
+    write_gated_champion(champ, bytes(booster.save_raw("json")), _tiny_manifest(trained_through))
+    return champ
 
 
 def _ctx(bars, as_of_idx=-1, lookback=LOOKBACK_BARS + 10):

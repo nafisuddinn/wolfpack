@@ -21,8 +21,9 @@ from wolfpack_worker.analyst.metrics import (
     classification_metrics,
     long_flat_backtest,
 )
-from wolfpack_worker.analyst.model_io import load_champion
-from wolfpack_worker.analyst.train import MODEL_PARAMS, NUM_BOOST_ROUND, run_training
+from wolfpack_worker.analyst.model_io import ModelIntegrityError, load_champion, write_champion
+from wolfpack_worker.analyst.recipe import load_v1_recipe
+from wolfpack_worker.analyst.train import run_training
 
 
 # ---------------------------------------------------------------------------
@@ -31,8 +32,11 @@ from wolfpack_worker.analyst.train import MODEL_PARAMS, NUM_BOOST_ROUND, run_tra
 
 
 def test_model_settings_are_the_fixed_design_values():
-    assert NUM_BOOST_ROUND == 300
-    assert MODEL_PARAMS == {
+    # The settings moved from train.MODEL_PARAMS / NUM_BOOST_ROUND into the
+    # frozen v1 recipe (worker/recipes/analyst/v1.toml); same values.
+    recipe = load_v1_recipe()
+    assert recipe.num_boost_round == 300
+    assert dict(recipe.xgb_params) == {
         "objective": "binary:logistic",
         "max_depth": 3,
         "learning_rate": 0.03,
@@ -158,9 +162,10 @@ def test_training_aborts_on_split_artifact(bars):
 # ---------------------------------------------------------------------------
 
 
-def test_mlflow_logging_and_promote(tmp_path, result):
+def test_mlflow_logging_and_manifest(tmp_path, result):
     mlflow = pytest.importorskip("mlflow")
-    from wolfpack_worker.analyst.train import log_to_mlflow, promote
+    from wolfpack_worker.analyst import train
+    from wolfpack_worker.analyst.train import build_manifest, log_to_mlflow, model_version_for
 
     tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
     artifact_root = tmp_path / "artifacts"
@@ -174,6 +179,8 @@ def test_mlflow_logging_and_promote(tmp_path, result):
     run = client.get_run(run_id)
     p = run.data.params
     assert p["feature_spec_version"] == FEATURE_SPEC_VERSION
+    assert p["recipe_id"] == load_v1_recipe().recipe_id
+    assert run.data.tags["recipe_id"] == load_v1_recipe().recipe_id
     assert json.loads(p["feature_names"]) == list(FEATURE_NAMES)
     assert p["embargo_sessions"] == "2"
     assert p["feature_matrix_sha256"] == result.feature_matrix_sha256
@@ -193,14 +200,24 @@ def test_mlflow_logging_and_promote(tmp_path, result):
     for c in children:
         assert client.list_artifacts(c.info.run_id) == []  # metrics only
 
+    # `train.promote` / `--promote` are retired: the only promotion path is
+    # the alphagate gate (gating.promote_from_gate). A manifest written
+    # directly, without a gate PROMOTE record, must not load.
+    assert not hasattr(train, "promote")
+    with pytest.raises(SystemExit):
+        train.main(["--promote"])
+    version = model_version_for(result.model_bytes)
+    manifest = build_manifest(result, run_id, model_version=version, gate_record_ids=["r1"],
+                              trial_number=None, promoted_by="test")
     champ_dir = tmp_path / "champion"
-    manifest = promote(result, run_id=run_id, champion_dir=champ_dir)
-    champ = load_champion(champ_dir)
-    assert champ.manifest == manifest
+    written = write_champion(champ_dir, result.model_bytes, manifest)
     for key in ("model_version", "mlflow_run_id", "trained_through", "feature_spec_version",
                 "feature_names", "model_sha256", "xgboost_version", "test_metrics",
-                "top_importances_gain"):
-        assert key in manifest, key
-    assert manifest["mlflow_run_id"] == run_id
-    assert manifest["model_version"].startswith("analyst-")
-    assert manifest["model_version"].endswith(manifest["model_sha256"][:8])
+                "top_importances_gain", "recipe_id", "recipe", "trial_number", "gate_record_ids"):
+        assert key in written, key
+    assert written["mlflow_run_id"] == run_id
+    assert written["recipe_id"] == load_v1_recipe().recipe_id
+    assert written["model_version"].startswith("analyst-")
+    assert written["model_version"].endswith(written["model_sha256"][:8])
+    with pytest.raises(ModelIntegrityError):
+        load_champion(champ_dir)
