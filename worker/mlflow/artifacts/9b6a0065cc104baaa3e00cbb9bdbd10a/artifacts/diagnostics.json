@@ -1,0 +1,241 @@
+{
+  "by_has_news_1": {
+    "has_news": {
+      "n": 1198,
+      "test_up_rate": 0.5342237061769616,
+      "train_up_rate": 0.546198347107438,
+      "accuracy": 0.5375626043405676,
+      "auc": 0.5041946684587814,
+      "logloss": 0.6944270657889936,
+      "brier": 0.250569070585651,
+      "baseline_accuracy": 0.5342237061769616,
+      "baseline_logloss": 0.6910916756226448,
+      "baseline_brier": 0.24897212996092688,
+      "beats_baseline_logloss": false
+    },
+    "no_news": {
+      "n": 62,
+      "test_up_rate": 0.6290322580645161,
+      "train_up_rate": 0.546198347107438,
+      "accuracy": 0.5806451612903226,
+      "auc": 0.48494983277591974,
+      "logloss": 0.6823268098937213,
+      "brier": 0.2446242477423358,
+      "baseline_accuracy": 0.6290322580645161,
+      "baseline_logloss": 0.6735215681854496,
+      "baseline_brier": 0.2402121331832173,
+      "beats_baseline_logloss": false
+    },
+    "share_rows_with_news": 0.9507936507936507
+  },
+  "rule_baseline": {
+    "band": 0.05,
+    "n_rows": 1260,
+    "n_fired": 847,
+    "coverage": 0.6722222222222223,
+    "n_long_signals": 547,
+    "n_flat_signals": 300,
+    "accuracy_when_fired": 0.5371900826446281,
+    "up_rate_when_long_signal": 0.5447897623400365,
+    "up_rate_when_flat_signal": 0.4766666666666667,
+    "up_rate_all_rows": 0.5388888888888889,
+    "per_ticker": {
+      "AAPL": {
+        "fraction_long": 0.7142857142857143,
+        "flips": 61,
+        "gross_logret": 0.14128046800933763,
+        "net_logret": 0.11078046800933763,
+        "buy_hold_logret": 0.2619773985600605
+      },
+      "JPM": {
+        "fraction_long": 0.6666666666666666,
+        "flips": 78,
+        "gross_logret": 0.11821366634250734,
+        "net_logret": 0.07921366634250734,
+        "buy_hold_logret": 0.054711089279669334
+      },
+      "QQQ": {
+        "fraction_long": 0.5317460317460317,
+        "flips": 99,
+        "gross_logret": 0.04924993190255465,
+        "net_logret": -0.0002500680974453495,
+        "buy_hold_logret": 0.2114616893437994
+      },
+      "SPY": {
+        "fraction_long": 0.7857142857142857,
+        "flips": 31,
+        "gross_logret": 0.15064060126924103,
+        "net_logret": 0.13514060126924105,
+        "buy_hold_logret": 0.14294529338131803
+      },
+      "XOM": {
+        "fraction_long": 0.49603174603174605,
+        "flips": 79,
+        "gross_logret": 0.2696957085083994,
+        "net_logret": 0.2301957085083994,
+        "buy_hold_logret": 0.33490778265984555
+      }
+    },
+    "mean_fraction_long": 0.6388888888888888,
+    "mean_flips": 69.6,
+    "mean_gross_logret": 0.14581607520640802,
+    "mean_net_logret": 0.11101607520640802,
+    "mean_buy_hold_logret": 0.20120065064493858,
+    "cost_bps_per_side": 5.0,
+    "label": "isolated rule baseline: pre-cost (gross); net uses a flat illustrative cost; not full-pipeline"
+  },
+  "by_revised_after_decision": {
+    "revised": {
+      "n": 61,
+      "test_up_rate": 0.5901639344262295,
+      "train_up_rate": 0.546198347107438,
+      "accuracy": 0.6065573770491803,
+      "auc": 0.51,
+      "logloss": 0.675319549086543,
+      "brier": 0.24129747813237434,
+      "baseline_accuracy": 0.5901639344262295,
+      "baseline_logloss": 0.6807247224224041,
+      "baseline_brier": 0.24380343779706887,
+      "beats_baseline_logloss": true
+    },
+    "not_revised": {
+      "n": 1199,
+      "test_up_rate": 0.53628023352794,
+      "train_up_rate": 0.546198347107438,
+      "accuracy": 0.53628023352794,
+      "auc": 0.5021677836579881,
+      "logloss": 0.694773473339738,
+      "brier": 0.25073336426652193,
+      "baseline_accuracy": 0.53628023352794,
+      "baseline_logloss": 0.6907105559263216,
+      "baseline_brier": 0.24878211363213398,
+      "beats_baseline_logloss": false
+    },
+    "share_rows_flagged": 0.048412698412698414
+  },
+  "stress_window": {
+    "window": [
+      "2020-03-01",
+      "2020-04-30"
+    ],
+    "model_trained_through": "2019-12-31T05:00:00+00:00",
+    "n": 215,
+    "test_up_rate": 0.5023255813953489,
+    "train_up_rate": 0.5542390194075587,
+    "accuracy": 0.48372093023255813,
+    "auc": 0.4535306334371755,
+    "logloss": 0.7091824934926213,
+    "brier": 0.2578563507207314,
+    "baseline_accuracy": 0.5023255813953489,
+    "baseline_logloss": 0.6985592732380187,
+    "baseline_brier": 0.2526895967174211,
+    "beats_baseline_logloss": false,
+    "model_backtest_isolated": {
+      "label": "isolated, pre-cost (gross); net uses a flat illustrative cost",
+      "cost_bps_per_side": 5.0,
+      "per_ticker": {
+        "AAPL": {
+          "n": 43,
+          "fraction_long": 0.9069767441860465,
+          "flips": 9,
+          "gross_logret": -0.10299072168351511,
+          "net_logret": -0.10749072168351512,
+          "buy_hold_logret": -0.04899434728946685
+        },
+        "JPM": {
+          "n": 43,
+          "fraction_long": 0.7441860465116279,
+          "flips": 18,
+          "gross_logret": -0.25924922844153986,
+          "net_logret": -0.26824922844153987,
+          "buy_hold_logret": -0.27353663624443436
+        },
+        "QQQ": {
+          "n": 43,
+          "fraction_long": 0.6511627906976745,
+          "flips": 19,
+          "gross_logret": -0.05844885343519356,
+          "net_logret": -0.06794885343519355,
+          "buy_hold_logret": -0.025659179699465438
+        },
+        "SPY": {
+          "n": 43,
+          "fraction_long": 0.9069767441860465,
+          "flips": 9,
+          "gross_logret": -0.13999774226345635,
+          "net_logret": -0.14449774226345635,
+          "buy_hold_logret": -0.09752911801847142
+        },
+        "XOM": {
+          "n": 43,
+          "fraction_long": 0.7674418604651163,
+          "flips": 17,
+          "gross_logret": -0.3098902250570067,
+          "net_logret": -0.3183902250570067,
+          "buy_hold_logret": -0.23831834933344487
+        }
+      },
+      "mean_fraction_long": 0.7953488372093023,
+      "mean_flips": 14.4,
+      "mean_gross_logret": -0.17411535417614232,
+      "mean_net_logret": -0.1813153541761423,
+      "mean_buy_hold_logret": -0.13680752611705657
+    },
+    "rule_baseline": {
+      "band": 0.05,
+      "n_rows": 215,
+      "n_fired": 102,
+      "coverage": 0.4744186046511628,
+      "n_long_signals": 65,
+      "n_flat_signals": 37,
+      "accuracy_when_fired": 0.5196078431372549,
+      "up_rate_when_long_signal": 0.5230769230769231,
+      "up_rate_when_flat_signal": 0.4864864864864865,
+      "up_rate_all_rows": 0.5023255813953489,
+      "per_ticker": {
+        "AAPL": {
+          "fraction_long": 0.6046511627906976,
+          "flips": 13,
+          "gross_logret": 0.05213731429152049,
+          "net_logret": 0.045637314291520494,
+          "buy_hold_logret": -0.04899434728946685
+        },
+        "JPM": {
+          "fraction_long": 0.5348837209302325,
+          "flips": 15,
+          "gross_logret": -0.008710713119296415,
+          "net_logret": -0.016210713119296415,
+          "buy_hold_logret": -0.27353663624443436
+        },
+        "QQQ": {
+          "fraction_long": 0.09302325581395349,
+          "flips": 1,
+          "gross_logret": -0.026395861900469775,
+          "net_logret": -0.026895861900469775,
+          "buy_hold_logret": -0.025659179699465438
+        },
+        "SPY": {
+          "fraction_long": 0.9534883720930233,
+          "flips": 3,
+          "gross_logret": 0.008518661419491008,
+          "net_logret": 0.007018661419491009,
+          "buy_hold_logret": -0.09752911801847142
+        },
+        "XOM": {
+          "fraction_long": 0.6046511627906976,
+          "flips": 11,
+          "gross_logret": -0.055675179529034786,
+          "net_logret": -0.061175179529034784,
+          "buy_hold_logret": -0.23831834933344487
+        }
+      },
+      "mean_fraction_long": 0.5581395348837208,
+      "mean_flips": 8.6,
+      "mean_gross_logret": -0.006025155767557895,
+      "mean_net_logret": -0.010325155767557895,
+      "mean_buy_hold_logret": -0.13680752611705657,
+      "cost_bps_per_side": 5.0,
+      "label": "isolated rule baseline: pre-cost (gross); net uses a flat illustrative cost; not full-pipeline"
+    }
+  }
+}

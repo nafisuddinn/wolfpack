@@ -1,0 +1,51 @@
+{
+  "label": "isolated, pre-cost (gross); net uses a flat illustrative cost",
+  "cost_bps_per_side": 5.0,
+  "per_ticker": {
+    "AAPL": {
+      "n": 252,
+      "fraction_long": 0.9642857142857143,
+      "flips": 19,
+      "gross_logret": 0.21971303221302896,
+      "net_logret": 0.21021303221302895,
+      "buy_hold_logret": 0.2619773985600605
+    },
+    "JPM": {
+      "n": 252,
+      "fraction_long": 0.8849206349206349,
+      "flips": 49,
+      "gross_logret": 0.060016172526106734,
+      "net_logret": 0.03551617252610673,
+      "buy_hold_logret": 0.054711089279669334
+    },
+    "QQQ": {
+      "n": 252,
+      "fraction_long": 0.8849206349206349,
+      "flips": 41,
+      "gross_logret": 0.23128213967207134,
+      "net_logret": 0.21078213967207135,
+      "buy_hold_logret": 0.2114616893437994
+    },
+    "SPY": {
+      "n": 252,
+      "fraction_long": 0.9484126984126984,
+      "flips": 25,
+      "gross_logret": 0.13235765313491019,
+      "net_logret": 0.11985765313491019,
+      "buy_hold_logret": 0.14294529338131803
+    },
+    "XOM": {
+      "n": 252,
+      "fraction_long": 0.8134920634920635,
+      "flips": 74,
+      "gross_logret": 0.36116232940746645,
+      "net_logret": 0.3241623294074665,
+      "buy_hold_logret": 0.33490778265984555
+    }
+  },
+  "mean_fraction_long": 0.8992063492063492,
+  "mean_flips": 41.6,
+  "mean_gross_logret": 0.2009062653907167,
+  "mean_net_logret": 0.18010626539071672,
+  "mean_buy_hold_logret": 0.20120065064493858
+}
