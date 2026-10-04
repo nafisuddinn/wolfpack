@@ -110,7 +110,10 @@ def test_slug_version_lookback_and_registered_last():
     assert s.slug == "the-analyst"
     assert s.version == "analyst/v1"
     assert s.lookback_bars == LOOKBACK_BARS == 80
-    assert list(REGISTRY)[-1] == "the-analyst"
+    # Registry order decides who skips on a same-ticker collision in the shared
+    # paper account (later persona skips; Decision Log 2026-09-26). The Scout
+    # was appended after The Analyst so no existing persona's behaviour changed.
+    assert list(REGISTRY) == ["trend-follower", "contrarian", "the-analyst", "the-scout"]
     assert REGISTRY["the-analyst"] is Analyst
 
 

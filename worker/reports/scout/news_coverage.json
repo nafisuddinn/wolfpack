@@ -1,0 +1,420 @@
+{
+  "as_of": "2026-10-02T20:00:00+00:00",
+  "created_at_first": "2016-01-04T21:41:06+00:00",
+  "created_at_last": "2026-10-02T19:00:47+00:00",
+  "generated_at": "2026-10-04T23:21:36.098837+00:00",
+  "labels_or_prices_used": false,
+  "live_latency_minutes": {
+    "n_live": 0
+  },
+  "market_dedup_per_year": {
+    "2016": 5787,
+    "2017": 5009,
+    "2018": 6714,
+    "2019": 10720,
+    "2020": 15927,
+    "2021": 12567,
+    "2022": 13574,
+    "2023": 14025,
+    "2024": 12457,
+    "2025": 13678,
+    "2026": 10003
+  },
+  "month_gaps": [],
+  "n_articles_universe": 120461,
+  "per_ticker": {
+    "AAPL": {
+      "headlines": 31898,
+      "per_year": {
+        "2016": {
+          "headlines": 2874,
+          "mean_per_session": 11.450199203187251,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9920318725099602
+        },
+        "2017": {
+          "headlines": 2028,
+          "mean_per_session": 8.079681274900398,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9960159362549801
+        },
+        "2018": {
+          "headlines": 1682,
+          "mean_per_session": 6.701195219123506,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9681274900398407
+        },
+        "2019": {
+          "headlines": 1750,
+          "mean_per_session": 6.944444444444445,
+          "sessions": 252,
+          "share_sessions_with_news": 0.9841269841269841
+        },
+        "2020": {
+          "headlines": 2036,
+          "mean_per_session": 8.047430830039525,
+          "sessions": 253,
+          "share_sessions_with_news": 0.9841897233201581
+        },
+        "2021": {
+          "headlines": 3644,
+          "mean_per_session": 14.46031746031746,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2022": {
+          "headlines": 4245,
+          "mean_per_session": 16.91235059760956,
+          "sessions": 251,
+          "share_sessions_with_news": 1.0
+        },
+        "2023": {
+          "headlines": 4270,
+          "mean_per_session": 17.08,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2024": {
+          "headlines": 3876,
+          "mean_per_session": 15.380952380952381,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2025": {
+          "headlines": 3318,
+          "mean_per_session": 13.272,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2026": {
+          "headlines": 2175,
+          "mean_per_session": 11.507936507936508,
+          "sessions": 189,
+          "share_sessions_with_news": 1.0
+        }
+      },
+      "share_sessions_with_news": 0.9929681717246485
+    },
+    "JPM": {
+      "headlines": 6298,
+      "per_year": {
+        "2016": {
+          "headlines": 417,
+          "mean_per_session": 1.6613545816733069,
+          "sessions": 251,
+          "share_sessions_with_news": 0.5816733067729084
+        },
+        "2017": {
+          "headlines": 375,
+          "mean_per_session": 1.4940239043824701,
+          "sessions": 251,
+          "share_sessions_with_news": 0.6613545816733067
+        },
+        "2018": {
+          "headlines": 296,
+          "mean_per_session": 1.1792828685258965,
+          "sessions": 251,
+          "share_sessions_with_news": 0.5856573705179283
+        },
+        "2019": {
+          "headlines": 339,
+          "mean_per_session": 1.3452380952380953,
+          "sessions": 252,
+          "share_sessions_with_news": 0.6150793650793651
+        },
+        "2020": {
+          "headlines": 462,
+          "mean_per_session": 1.826086956521739,
+          "sessions": 253,
+          "share_sessions_with_news": 0.7035573122529645
+        },
+        "2021": {
+          "headlines": 465,
+          "mean_per_session": 1.8452380952380953,
+          "sessions": 252,
+          "share_sessions_with_news": 0.7579365079365079
+        },
+        "2022": {
+          "headlines": 705,
+          "mean_per_session": 2.808764940239044,
+          "sessions": 251,
+          "share_sessions_with_news": 0.8047808764940239
+        },
+        "2023": {
+          "headlines": 920,
+          "mean_per_session": 3.68,
+          "sessions": 250,
+          "share_sessions_with_news": 0.896
+        },
+        "2024": {
+          "headlines": 705,
+          "mean_per_session": 2.7976190476190474,
+          "sessions": 252,
+          "share_sessions_with_news": 0.876984126984127
+        },
+        "2025": {
+          "headlines": 852,
+          "mean_per_session": 3.408,
+          "sessions": 250,
+          "share_sessions_with_news": 0.916
+        },
+        "2026": {
+          "headlines": 762,
+          "mean_per_session": 4.031746031746032,
+          "sessions": 189,
+          "share_sessions_with_news": 0.9470899470899471
+        }
+      },
+      "share_sessions_with_news": 0.7542561065877128
+    },
+    "QQQ": {
+      "headlines": 7635,
+      "per_year": {
+        "2016": {
+          "headlines": 85,
+          "mean_per_session": 0.3386454183266932,
+          "sessions": 251,
+          "share_sessions_with_news": 0.2788844621513944
+        },
+        "2017": {
+          "headlines": 125,
+          "mean_per_session": 0.49800796812749004,
+          "sessions": 251,
+          "share_sessions_with_news": 0.3466135458167331
+        },
+        "2018": {
+          "headlines": 393,
+          "mean_per_session": 1.5657370517928286,
+          "sessions": 251,
+          "share_sessions_with_news": 0.749003984063745
+        },
+        "2019": {
+          "headlines": 261,
+          "mean_per_session": 1.0357142857142858,
+          "sessions": 252,
+          "share_sessions_with_news": 0.5912698412698413
+        },
+        "2020": {
+          "headlines": 203,
+          "mean_per_session": 0.8023715415019763,
+          "sessions": 253,
+          "share_sessions_with_news": 0.525691699604743
+        },
+        "2021": {
+          "headlines": 407,
+          "mean_per_session": 1.6150793650793651,
+          "sessions": 252,
+          "share_sessions_with_news": 0.6944444444444444
+        },
+        "2022": {
+          "headlines": 495,
+          "mean_per_session": 1.9721115537848606,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9442231075697212
+        },
+        "2023": {
+          "headlines": 1193,
+          "mean_per_session": 4.772,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2024": {
+          "headlines": 1445,
+          "mean_per_session": 5.734126984126984,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2025": {
+          "headlines": 1854,
+          "mean_per_session": 7.416,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2026": {
+          "headlines": 1174,
+          "mean_per_session": 6.211640211640212,
+          "sessions": 189,
+          "share_sessions_with_news": 1.0
+        }
+      },
+      "share_sessions_with_news": 0.7327905255366395
+    },
+    "SPY": {
+      "headlines": 81117,
+      "per_year": {
+        "2016": {
+          "headlines": 2333,
+          "mean_per_session": 9.294820717131474,
+          "sessions": 251,
+          "share_sessions_with_news": 1.0
+        },
+        "2017": {
+          "headlines": 2508,
+          "mean_per_session": 9.99203187250996,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9960159362549801
+        },
+        "2018": {
+          "headlines": 4616,
+          "mean_per_session": 18.390438247011954,
+          "sessions": 251,
+          "share_sessions_with_news": 0.9920318725099602
+        },
+        "2019": {
+          "headlines": 8507,
+          "mean_per_session": 33.757936507936506,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2020": {
+          "headlines": 13301,
+          "mean_per_session": 52.573122529644266,
+          "sessions": 253,
+          "share_sessions_with_news": 1.0
+        },
+        "2021": {
+          "headlines": 8320,
+          "mean_per_session": 33.01587301587302,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2022": {
+          "headlines": 8487,
+          "mean_per_session": 33.81274900398407,
+          "sessions": 251,
+          "share_sessions_with_news": 1.0
+        },
+        "2023": {
+          "headlines": 8958,
+          "mean_per_session": 35.832,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2024": {
+          "headlines": 7988,
+          "mean_per_session": 31.6984126984127,
+          "sessions": 252,
+          "share_sessions_with_news": 1.0
+        },
+        "2025": {
+          "headlines": 9299,
+          "mean_per_session": 37.196,
+          "sessions": 250,
+          "share_sessions_with_news": 1.0
+        },
+        "2026": {
+          "headlines": 6800,
+          "mean_per_session": 35.97883597883598,
+          "sessions": 189,
+          "share_sessions_with_news": 1.0
+        }
+      },
+      "share_sessions_with_news": 0.9988897113249445
+    },
+    "XOM": {
+      "headlines": 3931,
+      "per_year": {
+        "2016": {
+          "headlines": 360,
+          "mean_per_session": 1.4342629482071714,
+          "sessions": 251,
+          "share_sessions_with_news": 0.6533864541832669
+        },
+        "2017": {
+          "headlines": 248,
+          "mean_per_session": 0.9880478087649402,
+          "sessions": 251,
+          "share_sessions_with_news": 0.5139442231075697
+        },
+        "2018": {
+          "headlines": 227,
+          "mean_per_session": 0.9043824701195219,
+          "sessions": 251,
+          "share_sessions_with_news": 0.5258964143426295
+        },
+        "2019": {
+          "headlines": 207,
+          "mean_per_session": 0.8214285714285714,
+          "sessions": 252,
+          "share_sessions_with_news": 0.46825396825396826
+        },
+        "2020": {
+          "headlines": 287,
+          "mean_per_session": 1.134387351778656,
+          "sessions": 253,
+          "share_sessions_with_news": 0.5889328063241107
+        },
+        "2021": {
+          "headlines": 289,
+          "mean_per_session": 1.1468253968253967,
+          "sessions": 252,
+          "share_sessions_with_news": 0.5833333333333334
+        },
+        "2022": {
+          "headlines": 508,
+          "mean_per_session": 2.0239043824701195,
+          "sessions": 251,
+          "share_sessions_with_news": 0.7529880478087649
+        },
+        "2023": {
+          "headlines": 523,
+          "mean_per_session": 2.092,
+          "sessions": 250,
+          "share_sessions_with_news": 0.808
+        },
+        "2024": {
+          "headlines": 449,
+          "mean_per_session": 1.7817460317460319,
+          "sessions": 252,
+          "share_sessions_with_news": 0.7579365079365079
+        },
+        "2025": {
+          "headlines": 374,
+          "mean_per_session": 1.496,
+          "sessions": 250,
+          "share_sessions_with_news": 0.688
+        },
+        "2026": {
+          "headlines": 459,
+          "mean_per_session": 2.4285714285714284,
+          "sessions": 189,
+          "share_sessions_with_news": 0.8677248677248677
+        }
+      },
+      "share_sessions_with_news": 0.6502590673575129
+    }
+  },
+  "revisions": {
+    "share_revised_after_own_decision_close": 0.004051103676708644,
+    "share_revised_more_than_1day_after_own_decision_close": 0.0017848100215007347,
+    "share_updated_after_created": 0.5241779497098646,
+    "share_updated_more_than_1min_after_created": 0.047733291272694066,
+    "update_lag_minutes_quantiles": {
+      "max": 3617046.783333333,
+      "p50": 0.016666666666666666,
+      "p90": 0.016666666666666666,
+      "p99": 102.40666666666608
+    }
+  },
+  "sessions": {
+    "first": "2016-01-04",
+    "last": "2026-10-02",
+    "n": 2703
+  },
+  "sources": {
+    "": 56761,
+    "benzinga": 63700
+  },
+  "store": "local",
+  "symbols_per_article": {
+    "median": 2.0,
+    "share_more_than_10": 0.05478121549713185
+  },
+  "timing_share": {
+    "after_close": 0.08272386913606894,
+    "in_session": 0.6183080000996173,
+    "non_session_day": 0.035754310523737974,
+    "pre_open": 0.26321382024057577
+  },
+  "vendor_archive_backfill": "not measurable from backfilled rows (no real first-seen time); measured going forward from live ingests (live_latency_minutes)"
+}

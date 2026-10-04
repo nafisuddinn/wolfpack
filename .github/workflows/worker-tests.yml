@@ -1,10 +1,11 @@
 name: Worker tests
 
-# Runs the worker's full test suite (including The Analyst's gate-log /
-# registration consistency checks and the MODEL_CARD.md drift check) on every
-# PR and on pushes to main, plus an append-only check on The Analyst's gate
-# and forward logs. No credentials: the tests use synthetic data and the
-# committed model/log files only, never Alpaca or Supabase.
+# Runs the worker's full test suite (including the gate-log / registration
+# consistency checks and model-card drift checks) on every PR and on pushes to
+# main, plus an append-only check on the gate and forward logs of both The
+# Analyst and The Scout (LOG_PATHS in wolfpack_worker/analyst/log_guard.py).
+# No credentials: the tests use synthetic data and the committed model/log
+# files only, never Alpaca or Supabase.
 #
 # The `train` dependency group depends on
 #   alphagate @ git+https://github.com/nafisuddinn/alphagate.git@v0.2.0
@@ -36,9 +37,11 @@ jobs:
           version: "0.12.17"
           python-version: "3.13"
 
-      # Fails if worker/models/analyst/gate_log.jsonl or forward_log.jsonl on
-      # the base is not a byte-prefix of this version: logged decisions
-      # (including rejected challengers) may only ever be appended to.
+      # Fails if any gate_log.jsonl or forward_log.jsonl under
+      # worker/models/analyst/ or worker/models/scout/ (LOG_PATHS in
+      # wolfpack_worker/analyst/log_guard.py) on the base is not a byte-prefix
+      # of this version: logged decisions (including rejected challengers) may
+      # only ever be appended to.
       # PR: compare with the base branch. Push to main: compare with the
       # commit before the push (skipped if that is all zeros, i.e. a new
       # branch). Manual run: skipped.

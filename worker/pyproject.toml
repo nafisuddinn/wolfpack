@@ -19,6 +19,9 @@ dependencies = [
     # the committed model.json is read by the version that wrote it.
     "xgboost-cpu>=3.4.1,<3.5; sys_platform == 'linux'",
     "xgboost>=3.4.1,<3.5; sys_platform != 'linux'",
+    # The Scout scores headlines with VADER in the daily cron (pinned exactly:
+    # a lexicon change would silently change every feature; MIT licence).
+    "vadersentiment==3.3.2",
 ]
 
 [project.scripts]

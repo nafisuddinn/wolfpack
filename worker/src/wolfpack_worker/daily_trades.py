@@ -6,13 +6,18 @@ Invoked by .github/workflows/daily-trades.yml's mechanical step as:
 For each active persona in `strategies.REGISTRY`:
 1. Reconcile any still-`pending` trade rows against the broker's view of
    reality (fills, rejections, crash-after-accept recovery) — always first.
-2. Refresh price data for the universe.
-3. Build a lookahead-safe `StrategyContext` and evaluate the strategy.
+2. Refresh price data for the universe, then news headlines (The Scout's
+   input) in their own failure boundary: a news failure only makes The
+   Scout skip the session; the other personas trade as usual.
+3. Build a lookahead-safe `StrategyContext` (plus, for strategies with
+   `requires_news`, a point-in-time `NewsSnapshot`) and evaluate.
 4. Plan and (unless `--dry-run`) execute any resulting order.
 
-`--dry-run` computes and prints everything above with zero DB writes and
+`--dry-run` computes and prints everything above with zero trade writes and
 zero broker order submissions — safe to run against production data to
-sanity-check what today's run *would* do.
+sanity-check what today's run *would* do. (As before, the price refresh
+still upserts bars, and the news refresh still inserts new headlines into
+the private news table: both are market data, not trades.)
 """
 
 from __future__ import annotations
@@ -21,7 +26,10 @@ import argparse
 import logging
 import sys
 from datetime import date, datetime, timedelta, timezone
-from typing import Sequence
+from typing import Callable, Optional, Sequence
+
+import numpy as np
+import pandas as pd
 
 from wolfpack_worker.broker import AlpacaPaperBroker, Broker
 from wolfpack_worker.config import WorkerConfig, load_config
@@ -35,14 +43,110 @@ from wolfpack_worker.execution import (
 )
 from wolfpack_worker.execution import FixedNotionalSizer, Sizer
 from wolfpack_worker.market_data import latest_completed_session, refresh_prices
+from wolfpack_worker.news import NewsFetcher, NewsRefreshResult, NewsStore, refresh_news
 from wolfpack_worker.store import PriceStore, SupabasePriceStore, SupabaseTradeRepo, TradeRepo
 from wolfpack_worker.strategies import REGISTRY
-from wolfpack_worker.strategies.base import Strategy, StrategyContext, truncate_bars
+from wolfpack_worker.strategies.base import (
+    NewsSnapshot,
+    Strategy,
+    StrategyContext,
+    truncate_bars,
+    truncate_news,
+)
 from wolfpack_worker.universe import UNIVERSE
 
 logger = logging.getLogger(__name__)
 
 _CALENDAR_LOOKBACK_DAYS = 10
+# An article counts as a late arrival if WolfPack first saw it more than this
+# long after the close of the session whose window it belongs to (the cron
+# runs ~30-90 min after the close; GitHub can delay it further).
+LATE_ARRIVAL_GRACE = timedelta(hours=3)
+
+
+def refresh_news_safely(
+    fetcher_factory: Callable[[], NewsFetcher],
+    news_store: NewsStore,
+    universe: Sequence[str],
+    now: datetime,
+) -> NewsRefreshResult:
+    """The daily news refresh in its own failure boundary: never raises."""
+    try:
+        return refresh_news(fetcher=fetcher_factory(), store=news_store, universe=universe, now=now)
+    except Exception as exc:  # noqa: BLE001 - a news failure must not stop other personas
+        logger.warning("daily_trades: news refresh failed: %s", exc, extra={"reason": "news_refresh_failed"})
+        return NewsRefreshResult(status="failed", error=f"{type(exc).__name__}: {exc}")
+
+
+def count_late_arrivals(articles: pd.DataFrame, closes: Sequence[datetime],
+                        grace: timedelta = LATE_ARRIVAL_GRACE) -> int:
+    """Live-ingested articles first seen > grace after the close of the
+    session their created_at falls in (i.e. after that session's decision
+    ran). Backfilled rows are excluded: their first_seen_at is the backfill
+    time by construction."""
+    if articles is None or len(articles) == 0 or not len(closes):
+        return 0
+    live = articles.loc[articles["ingest_mode"] == "live"]
+    if live.empty:
+        return 0
+    c = pd.DatetimeIndex(pd.to_datetime(list(closes), utc=True))
+    idx = c.searchsorted(pd.DatetimeIndex(live["created_at"]), side="left")
+    ok = idx < len(c)
+    own_close = pd.Series(pd.NaT, index=live.index, dtype="datetime64[ns, UTC]")
+    own_close[ok] = c[idx[ok]]
+    late = ok & (live["first_seen_at"] > own_close + grace).to_numpy()
+    return int(np.sum(late))
+
+
+def build_news_snapshot(
+    *,
+    news_store: Optional[NewsStore],
+    broker: Broker,
+    as_of: datetime,
+    refresh: Optional[NewsRefreshResult],
+    universe: Sequence[str],
+    lookback_sessions: int,
+) -> NewsSnapshot:
+    """Point-in-time news for one decision at `as_of` (= close of session t).
+
+    Covers `lookback_sessions` feature windows: sessions t-L..t plus the one
+    before (whose close bounds the earliest window). Unavailable ("failed" /
+    "stale", with a reason) if the refresh failed, the store can't be read,
+    the calendar doesn't end at as_of, or the stored history doesn't reach
+    back to the lookback start (run news_backfill first).
+    """
+    if news_store is None or refresh is None or not refresh.ok or refresh.cutoff is None:
+        why = "no news refresh ran" if refresh is None else f"news refresh {refresh.status}: {refresh.error}"
+        return NewsSnapshot.unavailable("failed", why)
+    try:
+        start_day = (as_of - timedelta(days=2 * lookback_sessions + 20)).date()
+        sessions = [s for s in broker.get_calendar(start_day, as_of.date()) if s.close <= as_of]
+        if not sessions or sessions[-1].close != as_of:
+            return NewsSnapshot.unavailable("stale", "market calendar does not end at as_of")
+        sessions = sessions[-(lookback_sessions + 1):]
+        if len(sessions) < lookback_sessions + 1:
+            return NewsSnapshot.unavailable("stale", "market calendar shorter than the news lookback")
+        start = sessions[0].close
+        earliest = news_store.earliest_created_at()
+        if earliest is None or earliest > start:
+            return NewsSnapshot.unavailable(
+                "stale",
+                f"stored news starts {earliest!r}, after the lookback start {start!r}: run "
+                "`python -m wolfpack_worker.news_backfill` first",
+            )
+        raw = news_store.get_articles(list(universe), start, as_of)
+    except Exception as exc:  # noqa: BLE001 - store/calendar I/O only; lookahead checks happen below
+        logger.warning("daily_trades: news snapshot failed: %s", exc, extra={"reason": "news_read_failed"})
+        return NewsSnapshot.unavailable("failed", f"news read failed: {type(exc).__name__}: {exc}")
+    arts, n_after_cutoff = truncate_news(raw, as_of, refresh.cutoff)
+    return NewsSnapshot(
+        articles=arts,
+        sessions=tuple(sessions),
+        cutoff=refresh.cutoff,
+        status="ok",
+        late_arrivals=count_late_arrivals(arts, [s.close for s in sessions]),
+        excluded_after_cutoff=n_after_cutoff,
+    )
 
 
 def run_persona(
@@ -56,10 +160,12 @@ def run_persona(
     sizer: Sizer,
     run_id: str,
     dry_run: bool,
+    news_store: Optional[NewsStore] = None,
+    news_refresh: Optional[NewsRefreshResult] = None,
 ) -> list[OrderIntent]:
     """Run one persona's full signal->order pipeline. Pure of any I/O side
-    effects besides `broker`/`trade_repo`/`price_store` — fully testable
-    with the fakes in tests/fakes.py.
+    effects besides `broker`/`trade_repo`/`price_store`/`news_store` — fully
+    testable with the fakes in tests/fakes.py.
     """
     reconcile_open_orders(broker, trade_repo, as_of.date())
 
@@ -70,7 +176,17 @@ def run_persona(
         for ticker in universe
     }
     bars = truncate_bars(raw_bars, as_of)
-    ctx = StrategyContext(as_of=as_of, universe=tuple(universe), bars=bars)
+    news = None
+    if getattr(strategy, "requires_news", False):
+        news = build_news_snapshot(
+            news_store=news_store,
+            broker=broker,
+            as_of=as_of,
+            refresh=news_refresh,
+            universe=universe,
+            lookback_sessions=int(getattr(strategy, "news_lookback_sessions")),
+        )
+    ctx = StrategyContext(as_of=as_of, universe=tuple(universe), bars=bars, news=news)
     targets = strategy.evaluate(ctx)
 
     open_tickers = {order.symbol for order in broker.get_open_orders()}
@@ -157,6 +273,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             session_close=as_of,
         )
 
+    # News (The Scout): its own failure boundary. The refresh's finish time is
+    # the run's news cutoff (live features use only rows first seen by then).
+    from wolfpack_worker.news import AlpacaNewsFetcher, SupabaseNewsStore
+
+    news_store = SupabaseNewsStore(supabase)
+    news_refresh = refresh_news_safely(
+        lambda: AlpacaNewsFetcher.from_config(config), news_store, UNIVERSE, datetime.now(tz=timezone.utc)
+    )
+    print(f"wolfpack_worker.daily_trades: news refresh {news_refresh.status} "
+          f"(fetched {news_refresh.n_fetched}, new {news_refresh.n_inserted})")
+
     total_intents = 0
     for slug, factory in REGISTRY.items():
         strategy = factory()
@@ -170,6 +297,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             sizer=sizer,
             run_id=run_id,
             dry_run=args.dry_run,
+            news_store=news_store,
+            news_refresh=news_refresh,
         )
         total_intents += len(intents)
         for intent in intents:

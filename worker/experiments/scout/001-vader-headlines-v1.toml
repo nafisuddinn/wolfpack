@@ -1,0 +1,29 @@
+# The Scout, trial 001: the confirmed design's v1 model (docs/design/scout-design.md, CONFIRMED 2026-10-04).
+# Registered BEFORE any Scout model was trained or any label was looked at. Only the M1 news coverage
+# report (worker/reports/scout/news_coverage.json: counts, timing, revisions; no prices or labels) existed.
+# Settings are The Analyst's untuned v1 recipe with feature_spec_version = "scout_v1" (design section 1).
+# Gate: one-sided paired DM vs the constant base rate, margin 0.0005 log loss, 5 Newey-West lags, trailing
+# 252 sessions, alpha_k = spend_alpha(alpha_total, k) with alpha_total from worker/recipes/scout/gate.toml.
+# Expected outcome: REJECT (little or no signal expected). Never edit, rename or delete this file once run.
+trial_number = 1
+registered = 2026-10-04
+hypothesis = "Headline tone (VADER) and news-volume surprise for the 5 tickers predict next-session open-to-open direction better than the base rate by more than 0.0005 log loss on the trailing 252-session holdout; expected to be rejected"
+
+[recipe]
+feature_spec_version = "scout_v1"
+label = "next_open_to_open_sign_v1"
+threshold = 0.5
+num_boost_round = 300
+universe = ["SPY", "QQQ", "AAPL", "JPM", "XOM"]
+train_since = "2016-01-04"
+
+[recipe.xgb_params]
+objective = "binary:logistic"
+max_depth = 3
+learning_rate = 0.03
+subsample = 0.8
+colsample_bytree = 0.8
+min_child_weight = 20
+reg_lambda = 1.0
+tree_method = "hist"
+seed = 42
