@@ -37,7 +37,6 @@ jobs:
           ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
         run: uv run --project worker -m wolfpack_worker.daily_trades
 
       - name: Configure git identity

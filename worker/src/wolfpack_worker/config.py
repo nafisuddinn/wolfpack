@@ -35,7 +35,6 @@ class WorkerConfig:
     alpaca_base_url: str
     supabase_url: str
     supabase_service_role_key: str
-    news_api_key: str | None = None
 
 
 def assert_paper_trading_endpoint(alpaca_base_url: str) -> None:
@@ -73,7 +72,6 @@ def load_config(env_file: str | None = ".env") -> WorkerConfig:
         alpaca_base_url=alpaca_base_url,
         supabase_url=os.environ.get("SUPABASE_URL", ""),
         supabase_service_role_key=os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""),
-        news_api_key=os.environ.get("NEWS_API_KEY") or None,
     )
 
 
