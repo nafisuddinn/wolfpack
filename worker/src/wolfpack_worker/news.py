@@ -108,7 +108,13 @@ def article_from_raw(raw: Mapping[str, Any]) -> NewsArticle:
 
 class NewsFetcher(Protocol):
     def fetch(self, symbols: Sequence[str], start: datetime, end: datetime) -> list[NewsArticle]:
-        """Articles mentioning any of `symbols` with start <= created_at <= end."""
+        """Articles mentioning any of `symbols` that the vendor returns for
+        [start, end]. NOTE: Alpaca filters this range on the article's
+        UPDATED time, not created_at (verified 2026-10-04: a query from
+        2016-01-04 returns articles created in Dec 2015 and revised later).
+        Every article created in [start, end] has updated_at >= created_at,
+        so tiling a range by update time still collects all of them, and
+        callers bucket by created_at themselves."""
         ...
 
 
@@ -117,6 +123,9 @@ class AlpacaNewsFetcher:
 
     Read-only market data: this client cannot place orders. Content is never
     requested (include_content=False); alpaca-py pages internally (50/page).
+    The returned headline is the vendor's CURRENT text, i.e. the latest
+    revision for an article revised after publication (the residual revision
+    leak measured in scout/coverage.py).
     """
 
     def __init__(self, api_key: str, secret_key: str) -> None:
@@ -337,9 +346,11 @@ def refresh_news(
     now: datetime,
     refetch_days: int = LIVE_REFETCH_DAYS,
 ) -> NewsRefreshResult:
-    """Fetch [now - refetch_days, now] for the universe and insert new rows
-    as ingest_mode "live" with first_seen_at = now (the same clock as the
-    cutoff). Never raises for a fetch/store failure: returns status
+    """Fetch [now - refetch_days, now] (by vendor update time, see
+    NewsFetcher) for the universe and insert new rows as ingest_mode "live"
+    with first_seen_at = now (the same clock as the cutoff). Everything
+    created in the feature lookback is updated within it, so the lookback is
+    always complete. Never raises for a fetch/store failure: returns status
     "failed" so the daily job can keep running the other personas.
     """
     now = _aware_utc(now, "now")
