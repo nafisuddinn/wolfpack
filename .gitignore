@@ -34,5 +34,10 @@ worker/mlflow/*.db-journal
 worker/mlflow/*.db-wal
 worker/mlflow/*.db-shm
 
+# The Scout's local news cache (worker/data/news_cache/). It holds licensed
+# Benzinga headline text and URLs, which must never be committed or
+# published (Decision Log 2026-10-04: headlines stay private).
+worker/data/
+
 # OS
 .DS_Store
