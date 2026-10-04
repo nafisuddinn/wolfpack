@@ -17,7 +17,6 @@ from dataclasses import replace
 from datetime import timedelta
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from analyst_helpers import append_jsonl, write_registration

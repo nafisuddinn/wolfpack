@@ -27,7 +27,7 @@ What it measures (all reported in MODEL_CARD_SCOUT.md by the documentarian):
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd

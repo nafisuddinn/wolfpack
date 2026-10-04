@@ -16,7 +16,6 @@ from wolfpack_worker import news
 from wolfpack_worker.news import (
     ARTICLE_COLUMNS,
     LocalNewsStore,
-    NewsArticle,
     SupabaseNewsStore,
     article_from_raw,
     refresh_news,

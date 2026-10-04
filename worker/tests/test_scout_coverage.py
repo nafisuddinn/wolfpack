@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from scout_helpers import UNIVERSE, articles, business_sessions, make_sessions, ny
+from scout_helpers import UNIVERSE, articles, business_sessions, ny
 from wolfpack_worker.news import articles_frame
 from wolfpack_worker.scout import coverage as C
 

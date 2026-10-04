@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -20,7 +19,6 @@ import pytest
 pytest.importorskip("alphagate")
 pytest.importorskip("sklearn")
 
-from alphagate import ListSink  # noqa: E402
 
 from analyst_helpers import write_registration  # noqa: E402
 from scout_helpers import SECRET, synthetic  # noqa: E402
