@@ -43,6 +43,9 @@ create index if not exists news_articles_created_at_idx on news_articles (create
 
 alter table news_articles enable row level security;
 
+-- drop-if-exists before each create policy / create trigger so re-running
+-- this migration is safe.
+drop policy if exists "news_articles_all_service_role" on news_articles;
 create policy "news_articles_all_service_role" on news_articles
   for all
   to service_role
@@ -61,6 +64,7 @@ begin
 end;
 $$;
 
+drop trigger if exists news_articles_no_update on news_articles;
 create trigger news_articles_no_update
   before update on news_articles
   for each row execute function news_articles_reject_update();

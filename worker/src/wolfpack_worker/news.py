@@ -200,6 +200,10 @@ def articles_frame(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
     df = pd.DataFrame([{c: r.get(c) for c in ARTICLE_COLUMNS} for r in rows], columns=list(ARTICLE_COLUMNS))
     df["id"] = df["id"].astype("int64")
     for c in ("created_at", "vendor_updated_at", "first_seen_at"):
+        # No silent UTC assumption: every stored timestamp must carry its own
+        # offset (pd.to_datetime(utc=True) would localize a naive one as UTC).
+        for v in df[c].dropna():
+            _aware_utc(v, c)
         df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601")
     df["symbols"] = df["symbols"].map(lambda s: tuple(s or ()))
     df = df.drop_duplicates("id").sort_values(["created_at", "id"], kind="mergesort").reset_index(drop=True)

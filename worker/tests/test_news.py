@@ -80,6 +80,29 @@ def test_article_from_raw_accepts_datetime_objects():
     assert a.created_at.tzinfo is not None
 
 
+def _frame_row(**over):
+    row = {"id": 1, "created_at": "2026-01-05T15:00:00Z", "vendor_updated_at": None, "headline": "h",
+           "source": "benzinga", "url": None, "symbols": ["AAPL"], "first_seen_at": "2026-01-06T22:00:00+00:00",
+           "ingest_mode": "live"}
+    row.update(over)
+    return row
+
+
+@pytest.mark.parametrize("col", ["created_at", "vendor_updated_at", "first_seen_at"])
+@pytest.mark.parametrize("naive", ["2026-01-05T15:00:00", datetime(2026, 1, 5, 15)])
+def test_articles_frame_refuses_naive_timestamps(col, naive):
+    # No silent UTC assumption: a naive stored timestamp is an error, not UTC.
+    with pytest.raises(ValueError, match="timezone"):
+        news.articles_frame([_frame_row(), _frame_row(id=2, **{col: naive})])
+
+
+def test_articles_frame_converts_offsets_to_utc_and_allows_missing_vendor_updated_at():
+    df = news.articles_frame([_frame_row(created_at="2026-01-05T10:00:00-05:00"),
+                              _frame_row(id=2, created_at=datetime(2026, 1, 5, 16, tzinfo=UTC))])
+    assert list(df["created_at"]) == [pd.Timestamp("2026-01-05T15:00:00Z"), pd.Timestamp("2026-01-05T16:00:00Z")]
+    assert df["vendor_updated_at"].isna().all()
+
+
 # --- local store ------------------------------------------------------------------------
 
 
@@ -280,6 +303,17 @@ def test_migration_keeps_news_private_and_insert_once():
     assert "before update on news_articles" in sql
     assert "using gin (symbols)" in sql
     assert "ingest_mode in ('backfill', 'live')" in sql
+
+
+def test_migration_is_safe_to_re_run():
+    sql = (REPO_ROOT / "supabase" / "migrations" / "20261004_0003_news_articles.sql").read_text().lower()
+    drop_policy = 'drop policy if exists "news_articles_all_service_role" on news_articles'
+    create_policy = 'create policy "news_articles_all_service_role" on news_articles'
+    drop_trigger = "drop trigger if exists news_articles_no_update on news_articles"
+    create_trigger = "create trigger news_articles_no_update"
+    for drop, create in ((drop_policy, create_policy), (drop_trigger, create_trigger)):
+        assert drop in sql and create in sql
+        assert sql.index(drop) < sql.index(create)
 
 
 def test_news_cache_is_gitignored():
