@@ -11,6 +11,14 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "alpaca-py>=0.44.0",
     "pandas>=3.0.6",
+    # The Analyst's model runs in the daily cron, so xgboost is a main dep.
+    # On Linux (CI) use the CPU-only wheel: the plain `xgboost` Linux wheel
+    # pulls in nvidia-nccl (~hundreds of MB) that a CPU-only daily job never
+    # uses. xgboost-cpu has no macOS wheel, so macOS dev uses plain xgboost.
+    # Both ship the same `xgboost` module; pinned to the same minor version so
+    # the committed model.json is read by the version that wrote it.
+    "xgboost-cpu>=3.4.1,<3.5; sys_platform == 'linux'",
+    "xgboost>=3.4.1,<3.5; sys_platform != 'linux'",
 ]
 
 [project.scripts]
@@ -19,6 +27,12 @@ wolfpack-worker = "wolfpack_worker:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+]
+# Only needed to train The Analyst (`python -m wolfpack_worker.analyst.train`),
+# not by the daily trade cron. Install with `uv sync --group train`.
+train = [
+    "mlflow>=3.0",
+    "scikit-learn>=1.5",
 ]
 
 [build-system]

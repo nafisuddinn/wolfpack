@@ -21,9 +21,18 @@ from supabase import Client
 
 _PRICE_COLUMNS = ["open", "high", "low", "close", "volume"]
 
+# Supabase/PostgREST caps every response at `max_rows` (1,000 by default)
+# server-side and silently truncates — `.limit(3000)` still returns 1,000.
+# Full-history reads must page with `.range()`.
+_PAGE_SIZE = 1000
+# Keep each upsert request body modest for multi-year backfills.
+_UPSERT_CHUNK = 500
+
 
 class PriceStore(Protocol):
     def get_bars(self, ticker: str, as_of: datetime, limit: int) -> pd.DataFrame: ...
+
+    def get_history(self, ticker: str, start: datetime, end: datetime) -> pd.DataFrame: ...
 
     def upsert_bars(self, ticker: str, timeframe: str, bars: pd.DataFrame) -> None: ...
 
@@ -107,6 +116,38 @@ class SupabasePriceStore:
         df = df.set_index("ts").sort_index()
         return df[_PRICE_COLUMNS]
 
+    def get_history(self, ticker: str, start: datetime, end: datetime) -> pd.DataFrame:
+        """All daily bars with start <= ts <= end, ascending, paging past the
+        server's row cap. Unlike `get_bars(limit=...)`, never silently
+        truncated: keeps requesting pages until one comes back empty, so it
+        stays correct even if the server's cap is below _PAGE_SIZE."""
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            response = (
+                self._client.table("prices")
+                .select("ts,open,high,low,close,volume")
+                .eq("ticker", ticker)
+                .eq("timeframe", "1Day")
+                .gte("ts", start.isoformat())
+                .lte("ts", end.isoformat())
+                .order("ts", desc=False)
+                .range(offset, offset + _PAGE_SIZE - 1)
+                .execute()
+            )
+            page = response.data or []
+            if not page:
+                break
+            rows.extend(page)
+            offset += len(page)
+        if not rows:
+            return pd.DataFrame(columns=_PRICE_COLUMNS)
+        df = pd.DataFrame(rows)
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+        df = df.drop_duplicates("ts").set_index("ts").sort_index()
+        df = df[_PRICE_COLUMNS].astype(float)
+        return df
+
     def upsert_bars(self, ticker: str, timeframe: str, bars: pd.DataFrame) -> None:
         if bars.empty:
             return
@@ -124,7 +165,10 @@ class SupabasePriceStore:
                     "volume": int(row["volume"]) if pd.notna(row["volume"]) else None,
                 }
             )
-        self._client.table("prices").upsert(records, on_conflict="ticker,timeframe,ts").execute()
+        for i in range(0, len(records), _UPSERT_CHUNK):
+            self._client.table("prices").upsert(
+                records[i : i + _UPSERT_CHUNK], on_conflict="ticker,timeframe,ts"
+            ).execute()
 
     def latest_bar_ts(self, ticker: str, timeframe: str) -> Optional[datetime]:
         response = (
