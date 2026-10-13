@@ -68,8 +68,13 @@ class Recipe:
     # -- construction / validation ------------------------------------------
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> "Recipe":
+    def from_dict(cls, d: Mapping[str, Any], *, feature_specs: Mapping[str, Any] | None = None) -> "Recipe":
+        """`feature_specs` is the persona's spec registry (default: The
+        Analyst's FEATURE_SPECS; The Scout passes SCOUT_FEATURE_SPECS). It
+        only validates `feature_spec_version`; the recipe_id hash is the
+        same function of the fields either way."""
         d = dict(d)
+        feature_specs = FEATURE_SPECS if feature_specs is None else feature_specs
         unknown = sorted(set(d) - set(_KEYS))
         if unknown:
             raise RecipeError(f"unknown recipe key(s): {unknown}")
@@ -78,9 +83,9 @@ class Recipe:
             raise RecipeError(f"recipe is missing key(s): {missing}")
 
         fsv = d["feature_spec_version"]
-        if fsv not in FEATURE_SPECS:
+        if fsv not in feature_specs:
             raise RecipeError(
-                f"feature_spec_version {fsv!r} is not registered (known: {sorted(FEATURE_SPECS)})"
+                f"feature_spec_version {fsv!r} is not registered (known: {sorted(feature_specs)})"
             )
         if d["label"] not in LABELS:
             raise RecipeError(f"label {d['label']!r} is not supported (known: {sorted(LABELS)})")

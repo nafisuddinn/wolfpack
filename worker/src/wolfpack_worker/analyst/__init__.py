@@ -21,5 +21,7 @@ Modules:
 - explore.py   — walk-forward strictly before the gate holdout (MLflow the-analyst-dev)
 - forward.py   — forward monitoring of each champion since promotion
 - render_history.py — MODEL_CARD.md gate-history table, generated from the logs
+- paths.py     — PersonaPaths: per-persona governance locations + parsers (ANALYST_PATHS);
+                 the governance modules above take `paths=` so The Scout reuses them
 - retrain.py   — CLI: `python -m wolfpack_worker.analyst.retrain {refresh|experiment|explore|monitor|bootstrap}`
 """

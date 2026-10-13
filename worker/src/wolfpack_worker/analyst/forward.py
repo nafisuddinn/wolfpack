@@ -20,6 +20,11 @@ Promotion time is the gate record's `decided_at`; the champion actually
 starts trading once that commit is merged and the next daily run picks it up,
 so the first forward session can be slightly early. That's accepted.
 
+Persona-generic: `paths` (analyst/paths.py) selects the persona's files,
+recipe parser and feature-spec registry; `prepare(bars, recipe)` builds that
+persona's labeled dataset (default: The Analyst's `prepare_dataset`; The
+Scout passes a closure that also binds its news and calendar).
+
 MODEL-RISK LIMITATION: a short forward record is noise. So far no Analyst
 champion has shown edge; see MODEL_CARD.md.
 """
@@ -30,7 +35,7 @@ import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 import pandas as pd
 from alphagate import paired_test, spend_alpha
@@ -38,7 +43,6 @@ from alphagate import paired_test, spend_alpha
 from wolfpack_worker.analyst.gate_log import PROMOTE, read_gate_log
 from wolfpack_worker.analyst.gating import (
     ALPHA_TOTAL,
-    ARCHIVE_DIR,
     HAC_LAGS,
     BoosterScorer,
     ConstantScorer,
@@ -47,12 +51,11 @@ from wolfpack_worker.analyst.gating import (
     per_session_logloss,
     truncate_to,
 )
-from wolfpack_worker.analyst.model_io import DEFAULT_CHAMPION_DIR, GATE_LOG_PATH, MODELS_DIR, Champion, load_champion
-from wolfpack_worker.analyst.recipe import Recipe
-from wolfpack_worker.analyst.registration import EXPERIMENTS_DIR
+from wolfpack_worker.analyst.model_io import Champion, load_champion
+from wolfpack_worker.analyst.paths import ANALYST_PATHS, PersonaPaths
 from wolfpack_worker.analyst.train import prepare_dataset
 
-FORWARD_LOG_PATH = MODELS_DIR / "forward_log.jsonl"
+FORWARD_LOG_PATH = ANALYST_PATHS.forward_log_path
 MIN_EDGE_SESSIONS = 126
 
 
@@ -67,12 +70,16 @@ def _promotion_time(records: Sequence[Mapping[str, Any]], model_version: str) ->
     return min(times)
 
 
-def _champions(champion_dir: Path, archive_dir: Path, gate_log_path: Path, experiments_dir: Path) -> list[Champion]:
-    champs = [load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)]
+def _champions(
+    champion_dir: Path, archive_dir: Path, gate_log_path: Path, experiments_dir: Path,
+    paths: PersonaPaths = ANALYST_PATHS,
+) -> list[Champion]:
+    champs = [load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir, paths=paths)]
     if Path(archive_dir).is_dir():
         for d in sorted(Path(archive_dir).iterdir()):
             if d.is_dir():
-                champs.append(load_champion(d, gate_log_path=gate_log_path, experiments_dir=experiments_dir))
+                champs.append(load_champion(d, gate_log_path=gate_log_path, experiments_dir=experiments_dir,
+                                            paths=paths))
     return champs
 
 
@@ -94,15 +101,25 @@ def run_monitor(
     bars: Mapping[str, pd.DataFrame],
     *,
     as_of: datetime,
-    champion_dir: Path = DEFAULT_CHAMPION_DIR,
-    archive_dir: Path = ARCHIVE_DIR,
-    gate_log_path: Path = GATE_LOG_PATH,
-    forward_log_path: Path = FORWARD_LOG_PATH,
-    experiments_dir: Path = EXPERIMENTS_DIR,
+    champion_dir: Optional[Path] = None,
+    archive_dir: Optional[Path] = None,
+    gate_log_path: Optional[Path] = None,
+    forward_log_path: Optional[Path] = None,
+    experiments_dir: Optional[Path] = None,
+    paths: PersonaPaths = ANALYST_PATHS,
+    prepare: Optional[Callable[[Mapping[str, pd.DataFrame], Any], pd.DataFrame]] = None,
 ) -> list[dict[str, Any]]:
+    """Every path defaults to the persona's (`paths`, The Analyst's by
+    default); `prepare` defaults to The Analyst's prepare_dataset."""
+    champion_dir = champion_dir if champion_dir is not None else paths.champion_dir
+    archive_dir = archive_dir if archive_dir is not None else paths.archive_dir
+    gate_log_path = gate_log_path if gate_log_path is not None else paths.gate_log_path
+    forward_log_path = forward_log_path if forward_log_path is not None else paths.forward_log_path
+    experiments_dir = experiments_dir if experiments_dir is not None else paths.experiments_dir
+    prepare = prepare if prepare is not None else prepare_dataset
     records = read_gate_log(gate_log_path)
     prior = read_gate_log(forward_log_path)
-    champs = _champions(champion_dir, archive_dir, gate_log_path, experiments_dir)
+    champs = _champions(champion_dir, archive_dir, gate_log_path, experiments_dir, paths)
     promoted = {c.manifest["model_version"]: _promotion_time(records, c.manifest["model_version"]) for c in champs}
     bars = truncate_to(bars, as_of)
     out: list[dict[str, Any]] = []
@@ -112,8 +129,9 @@ def run_monitor(
         start = promoted[version]
         later = [t for t in promoted.values() if t > start]
         end = min(later) if later else None
-        recipe = Recipe.from_dict(m["recipe"])
-        ds = matured(prepare_dataset(bars, recipe), as_of)
+        recipe = paths.recipe_parser(m["recipe"])
+        names = tuple(paths.feature_spec_lookup(recipe.feature_spec_version).names)
+        ds = matured(prepare(bars, recipe), as_of)
         fwd = ds.loc[ds["ts"] > start]
         if end is not None:
             fwd = fwd.loc[fwd["ts"] <= end]
@@ -133,8 +151,9 @@ def run_monitor(
             "metric": "per_session_mean_logloss (lower is better); diff = baseline - model",
         }
         if len(fwd):
-            h = build_shared_holdout([(recipe.feature_spec_version, fwd)], fwd["ts"].min())
-            s_m = per_session_logloss(BoosterScorer(champ.booster, recipe.feature_spec_version, p_up), h)
+            h = build_shared_holdout([(recipe.feature_spec_version, fwd)], fwd["ts"].min(),
+                                     names={recipe.feature_spec_version: names})
+            s_m = per_session_logloss(BoosterScorer(champ.booster, recipe.feature_spec_version, p_up, names), h)
             s_b = per_session_logloss(ConstantScorer(p_up), h)
             n = int(s_m.details["n_sessions"])
             rec.update({

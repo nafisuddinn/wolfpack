@@ -1,9 +1,10 @@
-"""CI guard: The Analyst's gate and forward logs are append-only.
+"""CI guard: every gated persona's gate and forward logs are append-only.
 
     python -m wolfpack_worker.analyst.log_guard --base <git ref>
 
-Fails (exit 1) if, for worker/models/analyst/gate_log.jsonl or
-forward_log.jsonl, the copy at `--base` is not a byte-prefix of the working
+Fails (exit 1) if, for any persona's gate_log.jsonl or forward_log.jsonl
+(worker/models/<persona>/, one pair per PersonaPaths: The Analyst and The
+Scout), the copy at `--base` is not a byte-prefix of the working
 tree's copy, i.e. if any already-logged decision was deleted, edited, or
 reordered (so a rejected challenger can't be quietly removed and its recipe
 re-run). Appending new lines is the only allowed change.
@@ -14,7 +15,9 @@ re-run). Appending new lines is the only allowed change.
   run): skipped with a message, exit 0.
 * An unknown base ref is an error, never a silent pass.
 
-Standard library only, so CI can run it without the `train` group.
+Standard library only, so CI can run it without the `train` group. That is
+why LOG_PATHS is a literal list rather than read from PersonaPaths; a test
+(tests/test_persona_paths.py) fails if it misses any persona's logs.
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 LOG_PATHS = (
     "worker/models/analyst/gate_log.jsonl",
     "worker/models/analyst/forward_log.jsonl",
+    "worker/models/scout/gate_log.jsonl",
+    "worker/models/scout/forward_log.jsonl",
 )
 
 

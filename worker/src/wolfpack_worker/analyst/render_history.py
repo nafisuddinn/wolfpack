@@ -17,6 +17,14 @@ Wording rules (so the table can't oversell):
   * otherwise "no detectable change" (a refresh is at most non-inferior, so
     it never reads "improved"); the bootstrap row reads "no comparison".
 
+Persona-generic: `paths` (analyst/paths.py) picks the logs, experiments
+directory, model card and marker names (`<persona>-gate-history`). The CLI
+renders The Analyst's card; The Scout's CLI calls `write(paths=SCOUT_PATHS)`.
+A trial run while a persona has no champion is a single gate call against
+the base rate (context.role "vs_base_rate"); its row says so, and "improved"
+then means "significantly better than the base rate on the holdout" (still
+not "edge", which needs the forward record).
+
 Reads plain JSON only (no alphagate import).
 """
 
@@ -30,16 +38,24 @@ from typing import Any, Mapping, Sequence
 from wolfpack_worker.analyst.forward import MIN_EDGE_SESSIONS
 from wolfpack_worker.analyst.gate_log import FORWARD_LOG_FILENAME, PROMOTE, read_gate_log
 from wolfpack_worker.analyst.model_io import GATE_LOG_PATH, MODELS_DIR
+from wolfpack_worker.analyst.paths import ANALYST_PATHS, PersonaPaths
 from wolfpack_worker.analyst.registration import EXPERIMENTS_DIR, REPO_ROOT, trial_count
 
-MODEL_CARD_PATH = REPO_ROOT / "MODEL_CARD.md"
+MODEL_CARD_PATH = ANALYST_PATHS.model_card_path
 FORWARD_LOG_PATH = MODELS_DIR / FORWARD_LOG_FILENAME
-BEGIN = (
-    "<!-- BEGIN GENERATED: analyst-gate-history. Written by "
-    "worker/src/wolfpack_worker/analyst/render_history.py from gate_log.jsonl + forward_log.jsonl; "
-    "do not edit by hand. -->"
-)
-END = "<!-- END GENERATED: analyst-gate-history -->"
+
+
+def markers(paths: PersonaPaths = ANALYST_PATHS) -> tuple[str, str]:
+    """(BEGIN, END) markers of a persona's generated gate-history section."""
+    begin = (
+        f"<!-- BEGIN GENERATED: {paths.history_marker}. Written by "
+        "worker/src/wolfpack_worker/analyst/render_history.py from gate_log.jsonl + forward_log.jsonl; "
+        "do not edit by hand. -->"
+    )
+    return begin, f"<!-- END GENERATED: {paths.history_marker} -->"
+
+
+BEGIN, END = markers(ANALYST_PATHS)
 
 COLUMNS = (
     "Date (UTC)",
@@ -118,7 +134,28 @@ def _row(event: Sequence[Mapping[str, Any]], forward: Sequence[Mapping[str, Any]
     base_ll = (chal.get("details") or {}).get("baseline_logloss")
     recipe_id = ctx.get("recipe_id") or (first.get("challenger_metadata") or {}).get("recipe_id")
 
-    if kind == "trial":
+    if kind == "trial" and any((r.get("context") or {}).get("role") == "vs_base_rate" for r in event):
+        # No champion existed: one gate call, challenger vs the constant
+        # base-rate predictor (paired DM superiority at alpha_k + margin).
+        main = next(r for r in event if (r.get("context") or {}).get("role") == "vs_base_rate")
+        mctx = main.get("context") or {}
+        promoted = all(r.get("decision") == PROMOTE for r in event)
+        kind_s = f"trial #{mctx.get('trial_number')} (k={mctx.get('k')})"
+        recipe_s = f"`{recipe_id}`: {mctx.get('hypothesis', '')}"
+        champ_ll = "n/a (no champion)"
+        st, pa = main.get("comparator_stats") or {}, main.get("comparator_params") or {}
+        test_s = (
+            f"t={_f(st.get('t'), 2)}, p={_g(st.get('p'))} vs alpha_k={_g(pa.get('alpha'))} "
+            f"(superiority by margin {pa.get('margin')}, vs base rate; no champion)"
+        )
+        try:
+            floor_s = "yes" if float(chal.get("value")) < float((main.get("champion_score") or {}).get("value")) else "no"
+        except (TypeError, ValueError):
+            floor_s = "n/a"
+        sig_s = f"{'yes' if main.get('reason_code') == 'significant_improvement' else 'no'} (p={_g(st.get('p'))})"
+        decision_s = f"{'PROMOTE' if promoted else 'REJECT'} (vs base rate: {main.get('reason_code')})"
+        reading = "improved" if main.get("reason_code") == "significant_improvement" else "no detectable change"
+    elif kind == "trial":
         main = next((r for r in event if (r.get("context") or {}).get("role") == "vs_champion_refit"), first)
         floor = next((r for r in event if (r.get("context") or {}).get("role") == "floor_vs_base_rate"), None)
         mctx = main.get("context") or {}
@@ -193,7 +230,11 @@ def _row(event: Sequence[Mapping[str, Any]], forward: Sequence[Mapping[str, Any]
 
 
 def render_table(
-    records: Sequence[Mapping[str, Any]], forward: Sequence[Mapping[str, Any]], *, n_registered: int
+    records: Sequence[Mapping[str, Any]],
+    forward: Sequence[Mapping[str, Any]],
+    *,
+    n_registered: int,
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> str:
     rows, promoted_trials = [], 0
     for event in _events(records):
@@ -203,12 +244,14 @@ def render_table(
         rows.append("| " + " | ".join(cells) + " |")
     lines = [
         f"**{n_registered} trials registered, {promoted_trials} promoted.** "
-        "(A trial is a committed registration in `worker/experiments/analyst/`, counted whether or not it ran. "
+        f"(A trial is a committed registration in `{paths.experiments_relpath()}/`, counted whether or not it ran. "
         "Refreshes and the one-time bootstrap are not trials.)",
         "",
         "Log loss is the per-session mean across the 5 tickers (lower is better). \"Base rate\" = always "
         "predicting the training up-rate. \"Reading\" uses fixed words: *improved* only if the trial's paired "
-        "test vs the champion's recipe was significant at its alpha_k; *edge* only if the model's forward "
+        "test vs the champion's recipe"
+        + ("" if paths is ANALYST_PATHS else " (or, while no champion exists, vs the base rate)")
+        + " was significant at its alpha_k; *edge* only if the model's forward "
         f"record covers at least {MIN_EDGE_SESSIONS} sessions and is significantly better than the base rate; "
         "otherwise *no detectable change*.",
         "",
@@ -221,35 +264,51 @@ def render_table(
     return "\n".join(lines)
 
 
-def splice(card: str, table: str) -> str:
-    if card.count(BEGIN) != 1 or card.count(END) != 1 or card.index(BEGIN) > card.index(END):
-        raise ValueError("MODEL_CARD.md must contain exactly one BEGIN and one END marker, in order")
-    head, rest = card.split(BEGIN)
-    _, tail = rest.split(END)
-    return f"{head}{BEGIN}\n{table}\n{END}{tail}"
+def has_markers(card: str, paths: PersonaPaths = ANALYST_PATHS) -> bool:
+    begin, end = markers(paths)
+    return card.count(begin) == 1 and card.count(end) == 1 and card.index(begin) < card.index(end)
+
+
+def splice(card: str, table: str, *, paths: PersonaPaths = ANALYST_PATHS) -> str:
+    begin, end = markers(paths)
+    if not has_markers(card, paths):
+        raise ValueError(
+            f"{Path(paths.model_card_path).name} must contain exactly one BEGIN and one END marker, in order"
+        )
+    head, rest = card.split(begin)
+    _, tail = rest.split(end)
+    return f"{head}{begin}\n{table}\n{end}{tail}"
 
 
 def current_table(
-    gate_log_path: Path = GATE_LOG_PATH,
-    forward_log_path: Path = FORWARD_LOG_PATH,
-    experiments_dir: Path = EXPERIMENTS_DIR,
+    gate_log_path: Path | None = None,
+    forward_log_path: Path | None = None,
+    experiments_dir: Path | None = None,
+    *,
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> str:
+    gate_log_path = gate_log_path if gate_log_path is not None else paths.gate_log_path
+    forward_log_path = forward_log_path if forward_log_path is not None else paths.forward_log_path
+    experiments_dir = experiments_dir if experiments_dir is not None else paths.experiments_dir
     records = read_gate_log(gate_log_path)
-    return render_table(records, read_gate_log(forward_log_path), n_registered=trial_count(experiments_dir, records))
+    return render_table(records, read_gate_log(forward_log_path),
+                        n_registered=trial_count(experiments_dir, records, paths=paths), paths=paths)
 
 
-def write(model_card_path: Path = MODEL_CARD_PATH) -> bool:
+def write(model_card_path: Path | None = None, *, paths: PersonaPaths = ANALYST_PATHS) -> bool:
     """Rewrite the generated section. Returns True if the file changed."""
+    model_card_path = model_card_path if model_card_path is not None else paths.model_card_path
     old = Path(model_card_path).read_text(encoding="utf-8")
-    new = splice(old, current_table())
+    new = splice(old, current_table(paths=paths), paths=paths)
     if new != old:
         Path(model_card_path).write_text(new, encoding="utf-8")
     return new != old
 
 
-def check(model_card_path: Path = MODEL_CARD_PATH) -> bool:
+def check(model_card_path: Path | None = None, *, paths: PersonaPaths = ANALYST_PATHS) -> bool:
+    model_card_path = model_card_path if model_card_path is not None else paths.model_card_path
     old = Path(model_card_path).read_text(encoding="utf-8")
-    return splice(old, current_table()) == old
+    return splice(old, current_table(paths=paths), paths=paths) == old
 
 
 def main(argv: Sequence[str] | None = None) -> int:

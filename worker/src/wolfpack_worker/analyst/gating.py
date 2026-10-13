@@ -88,6 +88,7 @@ from wolfpack_worker.analyst.dataset import EMBARGO_SESSIONS, TEST_SESSIONS, ses
 from wolfpack_worker.analyst.features import get_feature_spec
 from wolfpack_worker.analyst.gate_log import GateLogError, read_gate_log, verify_promotion
 from wolfpack_worker.analyst.metrics import predict_label
+from wolfpack_worker.analyst.paths import ANALYST_PATHS, PersonaPaths
 from wolfpack_worker.analyst.model_io import (
     DEFAULT_CHAMPION_DIR,
     GATE_LOG_PATH,
@@ -120,7 +121,7 @@ from wolfpack_worker.analyst.train import (
 
 logger = logging.getLogger(__name__)
 
-ARCHIVE_DIR = MODELS_DIR / "archive"
+ARCHIVE_DIR = ANALYST_PATHS.archive_dir
 METRIC_NAME = "per_session_mean_logloss"
 ALPHA_TOTAL = 0.05
 HAC_LAGS = 5
@@ -306,9 +307,16 @@ class BoosterScorer:
     booster: xgb.Booster
     spec_version: str
     train_up_rate: float
+    # Another persona's spec (not in The Analyst's registry) passes its
+    # feature names explicitly; None = look up an Analyst spec.
+    feature_names: Optional[tuple[str, ...]] = None
 
     def predict(self, data: SharedHoldout) -> np.ndarray:
-        names = list(get_feature_spec(self.spec_version).names)
+        names = (
+            list(self.feature_names)
+            if self.feature_names is not None
+            else list(get_feature_spec(self.spec_version).names)
+        )
         return self.booster.predict(xgb.DMatrix(data.X[self.spec_version], feature_names=names))
 
 
@@ -515,13 +523,16 @@ def promote_from_gate(
     gate_log_path: Path = GATE_LOG_PATH,
     archive_dir: Path = ARCHIVE_DIR,
     experiments_dir: Path = EXPERIMENTS_DIR,
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> dict[str, Any]:
     """Write `model_bytes` as the champion iff EVERY record is a PROMOTE of it.
 
     Archives the outgoing champion under archive_dir/<model_version>/ first
     (so `monitor` can keep scoring it), then re-loads the new champion
     through load_champion, i.e. through the same gate-log check the daily
-    cron uses.
+    cron uses. `paths` selects the persona's registration parser and
+    feature-spec registry for those checks (the directories are the explicit
+    arguments, so a caller passes all of them for a non-Analyst persona).
     """
     if not records:
         raise PromotionError("no gate records: nothing authorises this promotion")
@@ -539,7 +550,7 @@ def promote_from_gate(
         raise PromotionError(f"manifest gate_record_ids must be exactly {ids}")
     try:
         verify_promotion(read_gate_log(gate_log_path), model_version=version, model_sha256=sha, gate_record_ids=ids,
-                         registrations=registration_index(experiments_dir))
+                         registrations=registration_index(experiments_dir, paths=paths))
     except GateLogError as exc:
         raise PromotionError(f"the persisted gate log does not support this promotion: {exc}") from None
 
@@ -552,7 +563,8 @@ def promote_from_gate(
             for name in (MODEL_FILENAME, MANIFEST_FILENAME):
                 shutil.copy2(champion_dir / name, dest / name)
     written = write_champion(champion_dir, model_bytes, dict(manifest))
-    load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir)  # daily-cron check
+    load_champion(champion_dir, gate_log_path=gate_log_path, experiments_dir=experiments_dir,
+                  paths=paths)  # daily-cron check
     return written
 
 

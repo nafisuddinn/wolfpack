@@ -10,6 +10,13 @@ operational procedures those workflows run — not how this project is built.
 2. For each trade, write a first-person, plain-language rationale in that
    persona's voice:
    - The Analyst: base the rationale on that trade's feature importances.
+   - The Scout: base the rationale on the payload only: its `mode` (say
+     plainly when it is `rule_fallback`, i.e. the model was rejected by the
+     gate or not yet gated and an untuned neutral-band rule made the call),
+     the headline sentiment scores, counts and source names, and the
+     holdout vs base-rate numbers. Never quote, paraphrase, or link a
+     headline: headline text and URLs are licensed and stay private (they
+     are not in the payload; do not look them up).
    - The Pack: base the rationale on recent trust-weight changes.
 3. Write each rationale back to the database, attached to its trade.
 4. Commit the result.
@@ -42,6 +49,12 @@ The Claude step that follows writes prose only:
    any champion without a matching PROMOTE record, so a hand-written champion
    would stop The Analyst from trading.
 4. Commit the prose changes.
+
+The same rules cover The Scout (`worker/models/scout/`,
+`worker/experiments/scout/`, the `scout-gate-history` markers in
+`MODEL_CARD_SCOUT.md`): its trials are run by a human with
+`uv run --project worker --group train -m wolfpack_worker.scout.retrain experiment <file>`,
+never by this procedure.
 
 ## Non-negotiables
 

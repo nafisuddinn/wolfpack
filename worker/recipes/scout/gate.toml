@@ -1,0 +1,16 @@
+# The Scout's promotion-gate alpha budget (read by worker/src/wolfpack_worker/scout/gating.py).
+#
+# Trial k is tested at alpha_k = spend_alpha(alpha_total, k) = alpha_total / (k (k + 1)),
+# one-sided paired Diebold-Mariano superiority vs the constant base-rate predictor,
+# margin 0.0005 log loss, 5 Newey-West lags, on the trailing 252-session holdout.
+#
+# alpha_total = 0.05 is the CONFIRMED Scout design (docs/design/scout-design.md
+# section 6: alpha = spend_alpha(0.05, 1) = 0.025 for trial 1).
+#
+# PENDING RECONCILIATION: the signal roadmap (docs/design/signal-roadmap.md,
+# NOT approved as of 2026-10-04) proposes a project-wide alpha ledger with a
+# 0.015 Scout allocation, i.e. alpha_total = 0.015 and trial-1 alpha 0.0075.
+# If that ledger is approved this value changes, but only for trials that have
+# not run yet: the gate refuses to run if any logged Scout trial used a
+# different alpha_total (changing the budget after a trial is retroactive).
+alpha_total = 0.05

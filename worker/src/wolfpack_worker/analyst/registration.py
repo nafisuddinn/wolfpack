@@ -20,6 +20,11 @@ A registration is `worker/experiments/analyst/NNN-<slug>.toml`:
     [recipe.xgb_params]
     ...
 
+Each persona has its own experiments directory and trial count (its
+`PersonaPaths`, analyst/paths.py); every function here defaults to The
+Analyst's. The registration's `[recipe]` table is parsed by
+`paths.recipe_parser`.
+
 `preflight` refuses to start an experiment unless: the file is committed in
 HEAD and unchanged; worker/src, worker/recipes, worker/models (the gate and
 forward logs), worker/pyproject.toml, worker/uv.lock and the experiments
@@ -48,10 +53,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from wolfpack_worker.analyst.gate_log import evaluated_recipe_ids
+from wolfpack_worker.analyst.paths import ANALYST_PATHS, REPO_ROOT, PersonaPaths
 from wolfpack_worker.analyst.recipe import Recipe, RecipeError
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-EXPERIMENTS_DIR = REPO_ROOT / "worker" / "experiments" / "analyst"
+EXPERIMENTS_DIR = ANALYST_PATHS.experiments_dir
 # Paths (relative to the repo root) that must be clean for a trial to run.
 CLEAN_PATHS = ("worker/src", "worker/recipes", "worker/models", "worker/pyproject.toml", "worker/uv.lock")
 
@@ -69,11 +74,15 @@ class Registration:
     trial_number: int
     registered: _dt.date
     hypothesis: str
-    recipe: Recipe
+    recipe: Recipe  # (or another persona's recipe type, via paths.recipe_parser)
     abandoned: str | None
 
 
-def parse_registration(path: Path) -> Registration:
+def _dir(experiments_dir: Path | None, paths: PersonaPaths) -> Path:
+    return Path(experiments_dir) if experiments_dir is not None else paths.experiments_dir
+
+
+def parse_registration(path: Path, *, paths: PersonaPaths = ANALYST_PATHS) -> Registration:
     path = Path(path)
     m = _NAME_RE.match(path.name)
     if not m:
@@ -105,7 +114,7 @@ def parse_registration(path: Path) -> Registration:
     if "recipe" not in data or not isinstance(data["recipe"], Mapping):
         raise RegistrationError(f"{path.name}: a [recipe] table is required")
     try:
-        recipe = Recipe.from_dict(data["recipe"])
+        recipe = paths.recipe_parser(data["recipe"])
     except RecipeError as exc:
         raise RegistrationError(f"{path.name}: {exc}") from None
     abandoned = data.get("abandoned")
@@ -121,15 +130,18 @@ def parse_registration(path: Path) -> Registration:
     )
 
 
-def list_registrations(experiments_dir: Path = EXPERIMENTS_DIR) -> list[Registration]:
+def list_registrations(
+    experiments_dir: Path | None = None, *, paths: PersonaPaths = ANALYST_PATHS
+) -> list[Registration]:
     """Every registration, sorted by trial number, validated as a set:
     numbers are exactly 1..k and no two files register the same recipe.
-    Any *.toml that isn't a valid registration is an error (not ignored)."""
-    experiments_dir = Path(experiments_dir)
+    Any *.toml that isn't a valid registration is an error (not ignored).
+    `experiments_dir` defaults to `paths.experiments_dir`."""
+    experiments_dir = _dir(experiments_dir, paths)
     if not experiments_dir.is_dir():
         return []
     regs = sorted(
-        (parse_registration(p) for p in experiments_dir.glob("*.toml")),
+        (parse_registration(p, paths=paths) for p in experiments_dir.glob("*.toml")),
         key=lambda r: r.trial_number,
     )
     numbers = [r.trial_number for r in regs]
@@ -148,11 +160,11 @@ def list_registrations(experiments_dir: Path = EXPERIMENTS_DIR) -> list[Registra
     return regs
 
 
-def count_trials(experiments_dir: Path = EXPERIMENTS_DIR) -> int:
+def count_trials(experiments_dir: Path | None = None, *, paths: PersonaPaths = ANALYST_PATHS) -> int:
     """Number of registration files (abandoned included), NOT completed runs.
     The trial count used for alpha_k is `trial_count`, which also consults
     the gate log."""
-    return len(list_registrations(experiments_dir))
+    return len(list_registrations(experiments_dir, paths=paths))
 
 
 def file_sha256(path: Path) -> str:
@@ -214,16 +226,26 @@ def check_log_consistency(regs: Sequence[Registration], gate_records: Sequence[M
             )
 
 
-def trial_count(experiments_dir: Path, gate_records: Sequence[Mapping[str, Any]]) -> int:
+def trial_count(
+    experiments_dir: Path | None,
+    gate_records: Sequence[Mapping[str, Any]],
+    *,
+    paths: PersonaPaths = ANALYST_PATHS,
+) -> int:
     """k = max(registration files, distinct trial numbers in the gate log),
-    after checking the two agree. Abandoned registrations count."""
-    regs = list_registrations(experiments_dir)
+    after checking the two agree. Abandoned registrations count. Pass the
+    SAME persona's directory and gate log: each persona has its own k."""
+    regs = list_registrations(experiments_dir, paths=paths)
     check_log_consistency(regs, gate_records)
     return max(len(regs), len(logged_trials(gate_records)))
 
 
 def verify_runnable(
-    path: Path, *, experiments_dir: Path, gate_records: Sequence[Mapping[str, Any]]
+    path: Path,
+    *,
+    experiments_dir: Path,
+    gate_records: Sequence[Mapping[str, Any]],
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> tuple[Registration, int]:
     """Everything preflight checks except git: may this registration be run
     now as a counted trial? Returns (registration, k). gating.run_experiment
@@ -232,7 +254,7 @@ def verify_runnable(
     experiments_dir = Path(experiments_dir).resolve()
     if path.parent != experiments_dir:
         raise RegistrationError(f"{path} is not in the experiments directory {experiments_dir}")
-    reg = parse_registration(path)
+    reg = parse_registration(path, paths=paths)
     if reg.abandoned:
         raise RegistrationError(f"{path.name} is marked abandoned ({reg.abandoned}); it counts as a trial but is never run")
     logged = logged_trials(gate_records)
@@ -248,7 +270,7 @@ def verify_runnable(
             f"recipe {reg.recipe.recipe_id} has already been evaluated on a gate holdout; "
             "re-running it would be an uncounted second look"
         )
-    k = trial_count(experiments_dir, gate_records)
+    k = trial_count(experiments_dir, gate_records, paths=paths)
     if reg.trial_number > k:
         raise RegistrationError(f"trial_number {reg.trial_number} > number of trials {k}")
     return reg, k
@@ -276,13 +298,14 @@ def preflight(
     path: Path,
     *,
     repo_root: Path = REPO_ROOT,
-    experiments_dir: Path = EXPERIMENTS_DIR,
+    experiments_dir: Path | None = None,
     gate_records: Sequence[Mapping[str, Any]],
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> tuple[Registration, int]:
     """Validate that `path` may be run now as a counted trial. Returns (reg, k)."""
     path = Path(path).resolve()
     repo_root = Path(repo_root).resolve()
-    experiments_dir = Path(experiments_dir).resolve()
+    experiments_dir = _dir(experiments_dir, paths).resolve()
     if path.parent != experiments_dir:
         raise RegistrationError(f"{path} is not in the experiments directory {experiments_dir}")
     rel = path.relative_to(repo_root).as_posix()
@@ -304,4 +327,4 @@ def preflight(
             f"exactly what's committed):\n{dirty_exp}"
         )
 
-    return verify_runnable(path, experiments_dir=experiments_dir, gate_records=gate_records)
+    return verify_runnable(path, experiments_dir=experiments_dir, gate_records=gate_records, paths=paths)

@@ -30,20 +30,21 @@ from typing import Any
 
 import xgboost as xgb
 
-from wolfpack_worker.analyst.features import FeatureSpec, get_feature_spec
+from wolfpack_worker.analyst.features import FeatureSpec
 from wolfpack_worker.analyst.gate_log import (
     GATE_LOG_FILENAME,
     GateLogError,
     read_gate_log,
     verify_promotion,
 )
+from wolfpack_worker.analyst.paths import ANALYST_PATHS, PersonaPaths
 
 logger = logging.getLogger(__name__)
 
-# worker/src/wolfpack_worker/analyst/model_io.py -> worker/
-_WORKER_ROOT = Path(__file__).resolve().parents[3]
-MODELS_DIR = _WORKER_ROOT / "models" / "analyst"
-DEFAULT_CHAMPION_DIR = MODELS_DIR / "champion"
+# The Analyst's locations (see analyst/paths.py; other personas pass their
+# own PersonaPaths).
+MODELS_DIR = ANALYST_PATHS.models_dir
+DEFAULT_CHAMPION_DIR = ANALYST_PATHS.champion_dir
 GATE_LOG_PATH = MODELS_DIR / GATE_LOG_FILENAME
 MODEL_FILENAME = "model.json"
 MANIFEST_FILENAME = "manifest.json"
@@ -72,7 +73,7 @@ class ModelIntegrityError(RuntimeError):
 class Champion:
     booster: xgb.Booster
     manifest: dict[str, Any]
-    spec: FeatureSpec
+    spec: FeatureSpec  # (or another persona's spec: anything with .version / .names)
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -109,20 +110,22 @@ def default_gate_log_path(champion_dir: Path) -> Path:
     return Path(champion_dir).parent / GATE_LOG_FILENAME
 
 
-def registration_index(experiments_dir: Path | None):
+def registration_index(experiments_dir: Path | None, *, paths: PersonaPaths = ANALYST_PATHS):
     """A lazy loader of {trial_number: (registration file name, sha256)} for
     the backstop's trial checks. Registrations are only parsed if a trial
-    PROMOTE record actually needs them (the daily path usually doesn't)."""
+    PROMOTE record actually needs them (the daily path usually doesn't).
+    `experiments_dir` defaults to `paths.experiments_dir`."""
     def load():
         from wolfpack_worker.analyst.registration import (
-            EXPERIMENTS_DIR,
             RegistrationError,
             file_sha256,
             list_registrations,
         )
 
         try:
-            regs = list_registrations(Path(experiments_dir) if experiments_dir is not None else EXPERIMENTS_DIR)
+            regs = list_registrations(
+                Path(experiments_dir) if experiments_dir is not None else paths.experiments_dir, paths=paths
+            )
         except RegistrationError as exc:
             raise GateLogError(f"experiment registrations are invalid: {exc}") from None
         return {r.trial_number: (r.path.name, file_sha256(r.path)) for r in regs}
@@ -131,18 +134,21 @@ def registration_index(experiments_dir: Path | None):
 
 
 def load_champion(
-    champion_dir: Path = DEFAULT_CHAMPION_DIR,
+    champion_dir: Path | None = None,
     *,
     gate_log_path: Path | None = None,
     experiments_dir: Path | None = None,
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> Champion:
     """Load + verify the champion, INCLUDING that the alphagate gate promoted it.
 
-    `gate_log_path` defaults to `<champion_dir>/../gate_log.jsonl`;
-    `experiments_dir` (where trial registrations live) defaults to
-    worker/experiments/analyst.
+    `champion_dir` defaults to `paths.champion_dir` (The Analyst's:
+    worker/models/analyst/champion); `gate_log_path` defaults to
+    `<champion_dir>/../gate_log.jsonl`; `experiments_dir` (where trial
+    registrations live) defaults to `paths.experiments_dir`.
     """
-    champ = read_champion_artifact(champion_dir, required_keys=REQUIRED_MANIFEST_KEYS)
+    champion_dir = Path(champion_dir) if champion_dir is not None else paths.champion_dir
+    champ = read_champion_artifact(champion_dir, required_keys=REQUIRED_MANIFEST_KEYS, paths=paths)
     path = Path(gate_log_path) if gate_log_path is not None else default_gate_log_path(champion_dir)
     if not path.is_file():
         raise ModelIntegrityError(
@@ -156,7 +162,7 @@ def load_champion(
             model_version=m["model_version"],
             model_sha256=m["model_sha256"],
             gate_record_ids=list(m["gate_record_ids"]),
-            registrations=registration_index(experiments_dir),
+            registrations=registration_index(experiments_dir, paths=paths),
         )
     except GateLogError as exc:
         raise ModelIntegrityError(f"champion {m['model_version']!r} failed the gate-log check: {exc}") from None
@@ -164,22 +170,26 @@ def load_champion(
 
 
 def read_champion_artifact(
-    champion_dir: Path = DEFAULT_CHAMPION_DIR, *, required_keys: tuple[str, ...] = ARTIFACT_MANIFEST_KEYS
+    champion_dir: Path | None = None,
+    *,
+    required_keys: tuple[str, ...] = ARTIFACT_MANIFEST_KEYS,
+    paths: PersonaPaths = ANALYST_PATHS,
 ) -> Champion:
     """File-integrity checks only (presence, sha256, feature spec, names).
 
     Does NOT check the gate log. Used by load_champion (which then does) and
     by the one-time bootstrap gate, which evaluates the pre-gate v1 artifact
     before any gate record exists. Anything that will trade must use
-    load_champion.
+    load_champion. The feature spec is resolved with
+    `paths.feature_spec_lookup` (each persona has its own spec registry).
     """
-    champion_dir = Path(champion_dir)
+    champion_dir = Path(champion_dir) if champion_dir is not None else paths.champion_dir
     model_path = champion_dir / MODEL_FILENAME
     manifest_path = champion_dir / MANIFEST_FILENAME
     for p in (model_path, manifest_path):
         if not p.is_file():
             raise ModelIntegrityError(
-                f"The Analyst's champion file is missing: {p}. The committed "
+                f"{paths.display_name}'s champion file is missing: {p}. The committed "
                 "champion must exist; a missing file is a bug, not a 'hold'."
             )
 
@@ -196,7 +206,7 @@ def read_champion_artifact(
             f"file is {actual}. The model file was altered or doesn't match its manifest."
         )
     try:
-        spec = get_feature_spec(manifest["feature_spec_version"])
+        spec = paths.feature_spec_lookup(manifest["feature_spec_version"])
     except KeyError:
         raise ModelIntegrityError(
             f"feature_spec_version mismatch: model trained on "
@@ -219,7 +229,8 @@ def read_champion_artifact(
         )
     if manifest["xgboost_version"] != xgb.__version__:
         logger.warning(
-            "analyst.model_io: champion was written by xgboost %s, loading with %s.",
+            "model_io (%s): champion was written by xgboost %s, loading with %s.",
+            paths.persona,
             manifest["xgboost_version"],
             xgb.__version__,
         )
